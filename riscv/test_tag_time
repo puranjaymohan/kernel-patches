@@ -1,0 +1,17 @@
+Without Prog Pack:
+
+root@rv-selftester:~/src/kselftest/bpf# time ./test_tag
+test_tag: OK (40945 tests)
+
+real    7m18.685s
+user    0m19.981s
+sys     6m12.525s
+
+With Prog Pack:
+
+root@rv-selftester:~/src/kselftest/bpf# time ./test_tag
+test_tag: OK (40945 tests)
+
+real    7m33.490s
+user    0m22.574s
+sys     6m25.229s

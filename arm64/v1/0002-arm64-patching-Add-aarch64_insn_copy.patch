@@ -1,0 +1,84 @@
+From 9dd452f8f0c92292d0cfd01144b77394b28873fa Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+Date: Thu, 1 Jun 2023 18:04:37 +0000
+Subject: [PATCH bpf-next 2/3] arm64: patching: Add aarch64_insn_copy()
+
+This will be used by BPF JIT compiler to dump JITed binary to a RX huge
+page, and thus allow multiple BPF programs sharing the a huge (2MB)
+page.
+
+The bpf_prog_pack allocator that implements the above feature allocates
+a RX/RW buffer pair. The JITed code is written to the RW buffer and then
+this function will be used to copy the code from RW to RX buffer.
+
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+ arch/arm64/include/asm/patching.h |  1 +
+ arch/arm64/kernel/patching.c      | 39 +++++++++++++++++++++++++++++++
+ 2 files changed, 40 insertions(+)
+
+diff --git a/arch/arm64/include/asm/patching.h b/arch/arm64/include/asm/patching.h
+index 68908b82b168..dba9eb392bf1 100644
+--- a/arch/arm64/include/asm/patching.h
++++ b/arch/arm64/include/asm/patching.h
+@@ -8,6 +8,7 @@ int aarch64_insn_read(void *addr, u32 *insnp);
+ int aarch64_insn_write(void *addr, u32 insn);
+ 
+ int aarch64_insn_write_literal_u64(void *addr, u64 val);
++void *aarch64_insn_copy(void *addr, const void *opcode, size_t len);
+ 
+ int aarch64_insn_patch_text_nosync(void *addr, u32 insn);
+ int aarch64_insn_patch_text(void *addrs[], u32 insns[], int cnt);
+diff --git a/arch/arm64/kernel/patching.c b/arch/arm64/kernel/patching.c
+index b4835f6d594b..48c710f6a1ff 100644
+--- a/arch/arm64/kernel/patching.c
++++ b/arch/arm64/kernel/patching.c
+@@ -105,6 +105,45 @@ noinstr int aarch64_insn_write_literal_u64(void *addr, u64 val)
+ 	return ret;
+ }
+ 
++/**
++ * aarch64_insn_copy - Copy instructions into (an unused part of) RX memory
++ * @addr: address to modify
++ * @opcode: source of the copy
++ * @len: length to copy
++ *
++ * Useful for JITs to dump new code blocks into unused regions of RX memory.
++ */
++noinstr void *aarch64_insn_copy(void *addr, const void *opcode, size_t len)
++{
++	unsigned long flags;
++	size_t patched = 0;
++	size_t size;
++	void *waddr;
++	void *dst;
++	int ret;
++
++	raw_spin_lock_irqsave(&patch_lock, flags);
++
++	while (patched < len) {
++		dst = addr + patched;
++		size = min_t(size_t, PAGE_SIZE - offset_in_page(dst),
++			     len - patched);
++
++		waddr = patch_map(dst, FIX_TEXT_POKE0);
++		ret = copy_to_kernel_nofault(waddr, opcode + patched, size);
++		patch_unmap(FIX_TEXT_POKE0);
++
++		if (ret < 0) {
++			raw_spin_unlock_irqrestore(&patch_lock, flags);
++			return NULL;
++		}
++		patched += size;
++	}
++	raw_spin_unlock_irqrestore(&patch_lock, flags);
++
++	return addr;
++}
++
+ int __kprobes aarch64_insn_patch_text_nosync(void *addr, u32 insn)
+ {
+ 	u32 *tp = addr;
+-- 
+2.39.2
+

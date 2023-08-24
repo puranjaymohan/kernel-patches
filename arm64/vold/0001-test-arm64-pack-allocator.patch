@@ -1,0 +1,287 @@
+From ed28c9097a85c09040915f203bc2813b8253d31a Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <pjy@amazon.com>
+Date: Mon, 29 May 2023 21:55:36 +0000
+Subject: [PATCH] test arm64 pack allocator
+
+Signed-off-by: Puranjay Mohan <pjy@amazon.com>
+---
+ arch/arm64/include/asm/patching.h |  1 +
+ arch/arm64/kernel/patching.c      | 21 ++++++++
+ arch/arm64/net/bpf_jit_comp.c     | 83 +++++++++++++++++++++++++------
+ 3 files changed, 89 insertions(+), 16 deletions(-)
+
+diff --git a/arch/arm64/include/asm/patching.h b/arch/arm64/include/asm/patching.h
+index 68908b82b168..770c83171cb2 100644
+--- a/arch/arm64/include/asm/patching.h
++++ b/arch/arm64/include/asm/patching.h
+@@ -8,6 +8,7 @@ int aarch64_insn_read(void *addr, u32 *insnp);
+ int aarch64_insn_write(void *addr, u32 insn);
+ 
+ int aarch64_insn_write_literal_u64(void *addr, u64 val);
++int aarch64_insn_copy(void *addr, const void *opcode, size_t len);
+ 
+ int aarch64_insn_patch_text_nosync(void *addr, u32 insn);
+ int aarch64_insn_patch_text(void *addrs[], u32 insns[], int cnt);
+diff --git a/arch/arm64/kernel/patching.c b/arch/arm64/kernel/patching.c
+index b4835f6d594b..6c576c8935df 100644
+--- a/arch/arm64/kernel/patching.c
++++ b/arch/arm64/kernel/patching.c
+@@ -105,6 +105,27 @@ noinstr int aarch64_insn_write_literal_u64(void *addr, u64 val)
+ 	return ret;
+ }
+ 
++noinstr int aarch64_insn_copy(void *addr, const void *opcode, size_t len)
++{
++	u8 *waddr;
++	u8 *dst;
++	unsigned long flags;
++	int ret;
++	size_t i;
++
++	raw_spin_lock_irqsave(&patch_lock, flags);
++	for (i=0; i<len; i++) {
++		dst = addr + i;
++		waddr = patch_map(dst, FIX_TEXT_POKE0);
++		ret = copy_to_kernel_nofault(waddr, opcode + i, sizeof(u8));
++		patch_unmap(FIX_TEXT_POKE0);
++		if (ret)
++			return ret;
++	}
++	raw_spin_unlock_irqrestore(&patch_lock, flags);
++	return 0;
++}
++
+ int __kprobes aarch64_insn_patch_text_nosync(void *addr, u32 insn)
+ {
+ 	u32 *tp = addr;
+diff --git a/arch/arm64/net/bpf_jit_comp.c b/arch/arm64/net/bpf_jit_comp.c
+index 145b540ec34f..0b70400a6a0a 100644
+--- a/arch/arm64/net/bpf_jit_comp.c
++++ b/arch/arm64/net/bpf_jit_comp.c
+@@ -76,6 +76,7 @@ struct jit_ctx {
+ 	int *offset;
+ 	int exentry_idx;
+ 	__le32 *image;
++	__le32 *rw_image;
+ 	u32 stack_size;
+ 	int fpb_offset;
+ };
+@@ -91,8 +92,8 @@ struct bpf_plt {
+ 
+ static inline void emit(const u32 insn, struct jit_ctx *ctx)
+ {
+-	if (ctx->image != NULL)
+-		ctx->image[ctx->idx] = cpu_to_le32(insn);
++	if (ctx->rw_image != NULL)
++		ctx->rw_image[ctx->idx] = cpu_to_le32(insn);
+ 
+ 	ctx->idx++;
+ }
+@@ -638,12 +639,12 @@ static void build_plt(struct jit_ctx *ctx)
+ 	if ((ctx->idx + PLT_TARGET_OFFSET / AARCH64_INSN_SIZE) % 2)
+ 		emit(A64_NOP, ctx);
+ 
+-	plt = (struct bpf_plt *)(ctx->image + ctx->idx);
++	plt = (struct bpf_plt *)(ctx->rw_image + ctx->idx);
+ 	/* plt is called via bl, no BTI needed here */
+ 	emit(A64_LDR64LIT(tmp, 2 * AARCH64_INSN_SIZE), ctx);
+ 	emit(A64_BR(tmp), ctx);
+ 
+-	if (ctx->image)
++	if (ctx->rw_image)
+ 		plt->target = (u64)&dummy_tramp;
+ }
+ 
+@@ -722,6 +723,10 @@ static int add_exception_handler(const struct bpf_insn *insn,
+ 	offset = pc - (long)&ex->insn;
+ 	if (WARN_ON_ONCE(offset >= 0 || offset < INT_MIN))
+ 		return -ERANGE;
++
++	/* switch ex to rw buffer for writes */
++	ex = (void *)ctx->rw_image + ((void *)ex - (void *)ctx->image);
++
+ 	ex->insn = offset;
+ 
+ 	/*
+@@ -1420,7 +1425,7 @@ static int validate_code(struct jit_ctx *ctx)
+ 	int i;
+ 
+ 	for (i = 0; i < ctx->idx; i++) {
+-		u32 a64_insn = le32_to_cpu(ctx->image[i]);
++		u32 a64_insn = le32_to_cpu(ctx->rw_image[i]);
+ 
+ 		if (a64_insn == AARCH64_BREAK_FAULT)
+ 			return -1;
+@@ -1446,6 +1451,7 @@ static inline void bpf_flush_icache(void *start, void *end)
+ 
+ struct arm64_jit_data {
+ 	struct bpf_binary_header *header;
++	struct bpf_binary_header *rw_header;
+ 	u8 *image;
+ 	struct jit_ctx ctx;
+ };
+@@ -1454,6 +1460,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
+ {
+ 	int image_size, prog_size, extable_size, extable_align, extable_offset;
+ 	struct bpf_prog *tmp, *orig_prog = prog;
++	struct bpf_binary_header *rw_header;
+ 	struct bpf_binary_header *header;
+ 	struct arm64_jit_data *jit_data;
+ 	bool was_classic = bpf_prog_was_classic(prog);
+@@ -1461,6 +1468,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
+ 	bool extra_pass = false;
+ 	struct jit_ctx ctx;
+ 	u8 *image_ptr;
++	u8 *rw_image_ptr;
+ 
+ 	if (!prog->jit_requested)
+ 		return orig_prog;
+@@ -1489,6 +1497,8 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
+ 		ctx = jit_data->ctx;
+ 		image_ptr = jit_data->image;
+ 		header = jit_data->header;
++		rw_header = jit_data->rw_header;
++		rw_image_ptr = (void *)rw_header + ((void *)image_ptr - (void *)header);
+ 		extra_pass = true;
+ 		prog_size = sizeof(u32) * ctx.idx;
+ 		goto skip_init_ctx;
+@@ -1533,8 +1543,9 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
+ 	/* also allocate space for plt target */
+ 	extable_offset = round_up(prog_size + PLT_TARGET_SIZE, extable_align);
+ 	image_size = extable_offset + extable_size;
+-	header = bpf_jit_binary_alloc(image_size, &image_ptr,
+-				      sizeof(u32), jit_fill_hole);
++	header = bpf_jit_binary_pack_alloc(image_size, &image_ptr, sizeof(u32),
++					   &rw_header, &rw_image_ptr,
++					   jit_fill_hole);
+ 	if (header == NULL) {
+ 		prog = orig_prog;
+ 		goto out_off;
+@@ -1543,6 +1554,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
+ 	/* 2. Now, the actual pass. */
+ 
+ 	ctx.image = (__le32 *)image_ptr;
++	ctx.rw_image = (__le32 *)rw_image_ptr;
+ 	if (extable_size)
+ 		prog->aux->extable = (void *)image_ptr + extable_offset;
+ skip_init_ctx:
+@@ -1552,9 +1564,8 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
+ 	build_prologue(&ctx, was_classic);
+ 
+ 	if (build_body(&ctx, extra_pass)) {
+-		bpf_jit_binary_free(header);
+ 		prog = orig_prog;
+-		goto out_off;
++		goto out_image;
+ 	}
+ 
+ 	build_epilogue(&ctx);
+@@ -1562,14 +1573,13 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
+ 
+ 	/* 3. Extra pass to validate JITed code. */
+ 	if (validate_ctx(&ctx)) {
+-		bpf_jit_binary_free(header);
+ 		prog = orig_prog;
+-		goto out_off;
++		goto out_image;
+ 	}
+ 
+ 	/* And we're done. */
+ 	if (bpf_jit_enable > 1)
+-		bpf_jit_dump(prog->len, prog_size, 2, ctx.image);
++		bpf_jit_dump(prog->len, prog_size, 2, ctx.rw_image);
+ 
+ 	bpf_flush_icache(header, ctx.image + ctx.idx);
+ 
+@@ -1577,17 +1587,20 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
+ 		if (extra_pass && ctx.idx != jit_data->ctx.idx) {
+ 			pr_err_once("multi-func JIT bug %d != %d\n",
+ 				    ctx.idx, jit_data->ctx.idx);
+-			bpf_jit_binary_free(header);
+ 			prog->bpf_func = NULL;
+ 			prog->jited = 0;
+ 			prog->jited_len = 0;
+-			goto out_off;
++			goto out_image;
++		}
++		if (WARN_ON(bpf_jit_binary_pack_finalize(prog, header, rw_header))) {
++			header = NULL;
++			goto out_image;
+ 		}
+-		bpf_jit_binary_lock_ro(header);
+ 	} else {
+ 		jit_data->ctx = ctx;
+ 		jit_data->image = image_ptr;
+ 		jit_data->header = header;
++		jit_data->rw_header = rw_header;
+ 	}
+ 	prog->bpf_func = (void *)ctx.image;
+ 	prog->jited = 1;
+@@ -1610,6 +1623,14 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
+ 		bpf_jit_prog_release_other(prog, prog == orig_prog ?
+ 					   tmp : orig_prog);
+ 	return prog;
++
++out_image:
++	if (header) {
++		bpf_arch_text_copy(&header->size, &rw_header->size,
++				   sizeof(rw_header->size));
++		bpf_jit_binary_pack_free(header, rw_header);
++	}
++	goto out_off;
+ }
+ 
+ bool bpf_jit_supports_kfunc_call(void)
+@@ -1617,6 +1638,12 @@ bool bpf_jit_supports_kfunc_call(void)
+ 	return true;
+ }
+ 
++void *bpf_arch_text_copy(void *dst, void *src, size_t len) {
++	if (aarch64_insn_copy(dst, src, len))
++		return ERR_PTR(-EINVAL);
++	return dst;
++}
++
+ u64 bpf_jit_alloc_exec_limit(void)
+ {
+ 	return VMALLOC_END - VMALLOC_START;
+@@ -1992,7 +2019,7 @@ int arch_prepare_bpf_trampoline(struct bpf_tramp_image *im, void *image,
+ 	if (ret > max_insns)
+ 		return -EFBIG;
+ 
+-	ctx.image = image;
++	ctx.rw_image = image;
+ 	ctx.idx = 0;
+ 
+ 	jit_fill_hole(image, (unsigned int)(image_end - image));
+@@ -2221,3 +2248,27 @@ int bpf_arch_text_poke(void *ip, enum bpf_text_poke_type poke_type,
+ 
+ 	return ret;
+ }
++
++void bpf_jit_free(struct bpf_prog *prog)
++{
++	if (prog->jited) {
++		struct arm64_jit_data *jit_data = prog->aux->jit_data;
++		struct bpf_binary_header *hdr;
++
++		/*
++		 * If we fail the final pass of JIT (from jit_subprogs),
++		 * the program may not be finalized yet. Call finalize here
++		 * before freeing it.
++		 */
++		if (jit_data) {
++			bpf_jit_binary_pack_finalize(prog, jit_data->header,
++						     jit_data->rw_header);
++			kfree(jit_data);
++		}
++		hdr = bpf_jit_binary_pack_hdr(prog);
++		bpf_jit_binary_pack_free(hdr, NULL);
++		WARN_ON_ONCE(!bpf_prog_kallsyms_verify_off(prog));
++	}
++
++	bpf_prog_unlock_free(prog);
++}
+-- 
+2.39.2
+

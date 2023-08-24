@@ -1,0 +1,70 @@
+From 03882401e25d043745076adf249648aeeb5d3004 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+Date: Thu, 1 Jun 2023 17:17:16 +0000
+Subject: [PATCH bpf-next v3 1/3] bpf: make bpf_prog_pack allocator portable
+
+The bpf_prog_pack allocator currently uses module_alloc() and
+module_memfree() to allocate and free memory. This is not portable
+because different architectures use different methods for allocating
+memory for BPF programs. Like ARM64 uses vmalloc()/vfree().
+
+Use bpf_jit_alloc_exec() and bpf_jit_free_exec() for memory management
+in bpf_prog_pack allocator. Other architectures can override these with
+their implementation and will be able to use bpf_prog_pack directly.
+
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+Acked-by: Song Liu <song@kernel.org>
+---
+Changes in V2 => V3:
+- No changes
+
+Changes in v1 => v2:
+- No code changes.
+- Added Acked-by: Song Liu <song@kernel.org>
+
+kernel/bpf/core.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/bpf/core.c b/kernel/bpf/core.c
+index dc85240a0134..599136cb5096 100644
+--- a/kernel/bpf/core.c
++++ b/kernel/bpf/core.c
+@@ -860,7 +860,7 @@ static struct bpf_prog_pack *alloc_new_pack(bpf_jit_fill_hole_t bpf_fill_ill_ins
+ 		       GFP_KERNEL);
+ 	if (!pack)
+ 		return NULL;
+-	pack->ptr = module_alloc(BPF_PROG_PACK_SIZE);
++	pack->ptr = bpf_jit_alloc_exec(BPF_PROG_PACK_SIZE);
+ 	if (!pack->ptr) {
+ 		kfree(pack);
+ 		return NULL;
+@@ -884,7 +884,7 @@ void *bpf_prog_pack_alloc(u32 size, bpf_jit_fill_hole_t bpf_fill_ill_insns)
+ 	mutex_lock(&pack_mutex);
+ 	if (size > BPF_PROG_PACK_SIZE) {
+ 		size = round_up(size, PAGE_SIZE);
+-		ptr = module_alloc(size);
++		ptr = bpf_jit_alloc_exec(size);
+ 		if (ptr) {
+ 			bpf_fill_ill_insns(ptr, size);
+ 			set_vm_flush_reset_perms(ptr);
+@@ -922,7 +922,7 @@ void bpf_prog_pack_free(struct bpf_binary_header *hdr)
+ 
+ 	mutex_lock(&pack_mutex);
+ 	if (hdr->size > BPF_PROG_PACK_SIZE) {
+-		module_memfree(hdr);
++		bpf_jit_free_exec(hdr);
+ 		goto out;
+ 	}
+ 
+@@ -946,7 +946,7 @@ void bpf_prog_pack_free(struct bpf_binary_header *hdr)
+ 	if (bitmap_find_next_zero_area(pack->bitmap, BPF_PROG_CHUNK_COUNT, 0,
+ 				       BPF_PROG_CHUNK_COUNT, 0) == 0) {
+ 		list_del(&pack->list);
+-		module_memfree(pack->ptr);
++		bpf_jit_free_exec(pack->ptr);
+ 		kfree(pack);
+ 	}
+ out:
+-- 
+2.40.1
+
