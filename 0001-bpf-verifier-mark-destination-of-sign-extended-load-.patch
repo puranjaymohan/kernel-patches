@@ -1,0 +1,38 @@
+From 604788359092fa259cd5a9cd94bb6a653705459d Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+Date: Fri, 1 Sep 2023 11:18:59 +0000
+Subject: [PATCH] bpf: verifier: mark destination of sign-extended load as 64
+ bit
+
+The verifier can emit instructions to zero-extend destination registers
+when the register is being used to keep 32 bit values. This behaviour is
+enabled only when the JIT sets bpf_jit_needs_zext() -> true. In the case
+of a sign extended load instruction, the destination register always has a
+64-bit value, therefore the verifier should not emit zero-extend
+instructions for it.
+
+Change is_reg64() to return true if the register under consideration is a
+destination register of LDX instruction with mode = BPF_MEMSX.
+
+Fixes: 1f9a1ea821ff ("bpf: Support new sign-extension load insns")
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+ kernel/bpf/verifier.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/bpf/verifier.c b/kernel/bpf/verifier.c
+index bb78212fa5b2..93f84b868ccc 100644
+--- a/kernel/bpf/verifier.c
++++ b/kernel/bpf/verifier.c
+@@ -3029,7 +3029,7 @@ static bool is_reg64(struct bpf_verifier_env *env, struct bpf_insn *insn,
+ 
+ 	if (class == BPF_LDX) {
+ 		if (t != SRC_OP)
+-			return BPF_SIZE(code) == BPF_DW;
++			return (BPF_SIZE(code) == BPF_DW || BPF_MODE(code) == BPF_MEMSX);
+ 		/* LDX source must be ptr. */
+ 		return true;
+ 	}
+-- 
+2.40.1
+

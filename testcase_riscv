@@ -1,0 +1,40 @@
+Testing on RISCV64 Qemu with JIT disabled:
+
+The RISCV JIT ignores the zext instructions for LDX_B/W/HW as the
+architecture specific instructions don't need zext. The side effect of this
+is that even for sign extended loads, the JIT ignores the wrongly emitted
+zext instruction. Therefore it hides the bug.
+
+But the interpreter doesn't ignore zext instructions and thefore executes
+this wrongly emitted instruction. This can be seen if we run the
+verifier_ldsx selftest with the JIT disabled.
+
+The verifier_ldsx/LDSX, S32 fails because in this test the result is right
+shifted by 1 expecting to get a 1 from the 33rd bit. But because the zext
+is emitted after the load, the bits 33rd to 64th are zeroed.
+
+Without the patch:
+
+run_subtest:PASS:obj_open_mem 0 nsec
+run_subtest:PASS:unexpected_load_failure 0 nsec
+do_prog_test_run:PASS:bpf_prog_test_run 0 nsec
+run_subtest:FAIL:630 Unexpected retval: 2147483647 != -1
+#362/5   verifier_ldsx/LDSX, S32:FAIL
+
+With this patch applied:
+root@rv-selftester:~/self/bpf# echo 0 > /proc/sys/net/core/bpf_jit_enable
+root@rv-selftester:~/self/bpf# ./test_progs -a verifier_ldsx
+#362/1   verifier_ldsx/LDSX, S8:OK
+#362/2   verifier_ldsx/LDSX, S8 @unpriv:OK
+#362/3   verifier_ldsx/LDSX, S16:OK
+#362/4   verifier_ldsx/LDSX, S16 @unpriv:OK
+#362/5   verifier_ldsx/LDSX, S32:OK
+#362/6   verifier_ldsx/LDSX, S32 @unpriv:OK
+#362/7   verifier_ldsx/LDSX, S8 range checking, privileged:OK
+#362/8   verifier_ldsx/LDSX, S16 range checking:OK
+#362/9   verifier_ldsx/LDSX, S16 range checking @unpriv:OK
+#362/10  verifier_ldsx/LDSX, S32 range checking:OK
+#362/11  verifier_ldsx/LDSX, S32 range checking @unpriv:OK
+#362     verifier_ldsx:OK
+Summary: 1/11 PASSED, 0 SKIPPED, 0 FAILED
+root@rv-selftester:~/self/bpf#
