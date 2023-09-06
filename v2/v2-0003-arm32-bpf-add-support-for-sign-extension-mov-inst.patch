@@ -1,0 +1,112 @@
+From 2754ad8931aaa9f664ba23c57d35c41a640f0126 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+Date: Wed, 30 Aug 2023 08:31:45 +0000
+Subject: [PATCH bpf-next v2 3/8] arm32, bpf: add support for sign-extension
+ mov instruction
+
+The cpuv4 added a new BPF_MOVSX instruction that sign extends the src
+before moving it to the destination.
+
+BPF_ALU | BPF_MOVSX sign extends 8-bit and 16-bit operands into 32-bit
+operands, and zeroes the remaining upper 32 bits.
+
+BPF_ALU64 | BPF_MOVSX sign extends 8-bit, 16-bit, and 32-bit  operands
+into 64-bit operands.
+
+The offset field of the instruction is used to tell the number of bit to
+use for sign-extension. BPF_MOV and BPF_MOVSX have the same code but the
+former sets offset to 0 and the later one sets the offset to 8, 16 or 32
+
+The behaviour of this instruction is dst = (s8,s16,s32)src
+
+On ARM32 the implementation uses LSH and ARSH to extend the 8/16 bits to
+a 32-bit register and then it is sign extended to the upper 32-bit
+register using ARSH. For 32-bit we just move it to the destination
+register and use ARSH to extend it to the upper 32-bit register.
+
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+ arch/arm/net/bpf_jit_32.c | 35 ++++++++++++++++++++++++++++++-----
+ 1 file changed, 30 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/net/bpf_jit_32.c b/arch/arm/net/bpf_jit_32.c
+index 0a272a02959b..56ea8022e989 100644
+--- a/arch/arm/net/bpf_jit_32.c
++++ b/arch/arm/net/bpf_jit_32.c
+@@ -747,12 +747,16 @@ static inline void emit_a32_alu_r64(const bool is64, const s8 dst[],
+ }
+ 
+ /* dst = src (4 bytes)*/
+-static inline void emit_a32_mov_r(const s8 dst, const s8 src,
++static inline void emit_a32_mov_r(const s8 dst, const s8 src, const u8 off,
+ 				  struct jit_ctx *ctx) {
+ 	const s8 *tmp = bpf2a32[TMP_REG_1];
+ 	s8 rt;
+ 
+ 	rt = arm_bpf_get_reg32(src, tmp[0], ctx);
++	if (off && off != 32) {
++		emit(ARM_LSL_I(rt, rt, 32 - off), ctx);
++		emit(ARM_ASR_I(rt, rt, 32 - off), ctx);
++	}
+ 	arm_bpf_put_reg32(dst, rt, ctx);
+ }
+ 
+@@ -761,15 +765,15 @@ static inline void emit_a32_mov_r64(const bool is64, const s8 dst[],
+ 				  const s8 src[],
+ 				  struct jit_ctx *ctx) {
+ 	if (!is64) {
+-		emit_a32_mov_r(dst_lo, src_lo, ctx);
++		emit_a32_mov_r(dst_lo, src_lo, 0, ctx);
+ 		if (!ctx->prog->aux->verifier_zext)
+ 			/* Zero out high 4 bytes */
+ 			emit_a32_mov_i(dst_hi, 0, ctx);
+ 	} else if (__LINUX_ARM_ARCH__ < 6 &&
+ 		   ctx->cpu_architecture < CPU_ARCH_ARMv5TE) {
+ 		/* complete 8 byte move */
+-		emit_a32_mov_r(dst_lo, src_lo, ctx);
+-		emit_a32_mov_r(dst_hi, src_hi, ctx);
++		emit_a32_mov_r(dst_lo, src_lo, 0, ctx);
++		emit_a32_mov_r(dst_hi, src_hi, 0, ctx);
+ 	} else if (is_stacked(src_lo) && is_stacked(dst_lo)) {
+ 		const u8 *tmp = bpf2a32[TMP_REG_1];
+ 
+@@ -785,6 +789,24 @@ static inline void emit_a32_mov_r64(const bool is64, const s8 dst[],
+ 	}
+ }
+ 
++/* dst = (signed)src */
++static inline void emit_a32_movsx_r64(const bool is64, const u8 off, const s8 dst[], const s8 src[],
++				      struct jit_ctx *ctx) {
++	const s8 *tmp = bpf2a32[TMP_REG_1];
++	const s8 *rt;
++
++	rt = arm_bpf_get_reg64(dst, tmp, ctx);
++
++	emit_a32_mov_r(dst_lo, src_lo, off, ctx);
++	if (!is64) {
++		if (!ctx->prog->aux->verifier_zext)
++			/* Zero out high 4 bytes */
++			emit_a32_mov_i(dst_hi, 0, ctx);
++	} else {
++		emit(ARM_ASR_I(rt[0], rt[1], 31), ctx);
++	}
++}
++
+ /* Shift operations */
+ static inline void emit_a32_alu_i(const s8 dst, const u32 val,
+ 				struct jit_ctx *ctx, const u8 op) {
+@@ -1446,7 +1468,10 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx)
+ 				emit_a32_mov_i(dst_hi, 0, ctx);
+ 				break;
+ 			}
+-			emit_a32_mov_r64(is64, dst, src, ctx);
++			if (insn->off)
++				emit_a32_movsx_r64(is64, insn->off, dst, src, ctx);
++			else
++				emit_a32_mov_r64(is64, dst, src, ctx);
+ 			break;
+ 		case BPF_K:
+ 			/* Sign-extend immediate value to destination reg */
+-- 
+2.39.2
+

@@ -1,0 +1,119 @@
+From a2acc9118c48a2bb2c2d6a9dc25d1c9a785548d8 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+Date: Sat, 2 Sep 2023 10:25:19 +0000
+Subject: [PATCH bpf-next v2 5/8] arm32, bpf: add support for 32-bit signed
+ division
+
+The cpuv4 added a new BPF_SDIV instruction that does signed division.
+The encoding is similar to BPF_DIV but BPF_SDIV sets offset=1.
+
+ARM32 already supports 32-bit BPF_DIV which can be easily extended to
+support BPF_SDIV as ARM32 has the SDIV instruction. When the CPU is not
+ARM-v7, we implement that SDIV/SMOD with the function call similar to
+the implementation of DIV/MOD.
+
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+ arch/arm/net/bpf_jit_32.c | 38 ++++++++++++++++++++++++++++++--------
+ arch/arm/net/bpf_jit_32.h |  2 ++
+ 2 files changed, 32 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/net/bpf_jit_32.c b/arch/arm/net/bpf_jit_32.c
+index f837db5c71b1..91b3294963bc 100644
+--- a/arch/arm/net/bpf_jit_32.c
++++ b/arch/arm/net/bpf_jit_32.c
+@@ -228,6 +228,16 @@ static u32 jit_mod32(u32 dividend, u32 divisor)
+ 	return dividend % divisor;
+ }
+ 
++static s32 jit_sdiv32(s32 dividend, s32 divisor)
++{
++	return dividend / divisor;
++}
++
++static s32 jit_smod32(s32 dividend, s32 divisor)
++{
++	return dividend % divisor;
++}
++
+ static inline void _emit(int cond, u32 inst, struct jit_ctx *ctx)
+ {
+ 	inst |= (cond << 28);
+@@ -477,17 +487,18 @@ static inline int epilogue_offset(const struct jit_ctx *ctx)
+ 	return to - from - 2;
+ }
+ 
+-static inline void emit_udivmod(u8 rd, u8 rm, u8 rn, struct jit_ctx *ctx, u8 op)
++static inline void emit_udivmod(u8 rd, u8 rm, u8 rn, struct jit_ctx *ctx, u8 op, u8 sign)
+ {
+ 	const int exclude_mask = BIT(ARM_R0) | BIT(ARM_R1);
+ 	const s8 *tmp = bpf2a32[TMP_REG_1];
++	u32 dst;
+ 
+ #if __LINUX_ARM_ARCH__ == 7
+ 	if (elf_hwcap & HWCAP_IDIVA) {
+-		if (op == BPF_DIV)
+-			emit(ARM_UDIV(rd, rm, rn), ctx);
+-		else {
+-			emit(ARM_UDIV(ARM_IP, rm, rn), ctx);
++		if (op == BPF_DIV) {
++			emit(sign ? ARM_SDIV(rd, rm, rn) : ARM_UDIV(rd, rm, rn), ctx);
++		} else {
++			emit(sign ? ARM_SDIV(ARM_IP, rm, rn) : ARM_UDIV(ARM_IP, rm, rn), ctx);
+ 			emit(ARM_MLS(rd, rn, ARM_IP, rm), ctx);
+ 		}
+ 		return;
+@@ -515,8 +526,19 @@ static inline void emit_udivmod(u8 rd, u8 rm, u8 rn, struct jit_ctx *ctx, u8 op)
+ 	emit(ARM_PUSH(CALLER_MASK & ~exclude_mask), ctx);
+ 
+ 	/* Call appropriate function */
+-	emit_mov_i(ARM_IP, op == BPF_DIV ?
+-		   (u32)jit_udiv32 : (u32)jit_mod32, ctx);
++	if (sign) {
++		if (op == BPF_DIV)
++			dst = (u32)jit_sdiv32;
++		else
++			dst = (u32)jit_smod32;
++	} else {
++		if (op == BPF_DIV)
++			dst = (u32)jit_udiv32;
++		else
++			dst = (u32)jit_mod32;
++	}
++
++	emit_mov_i(ARM_IP, dst, ctx);
+ 	emit_blx_r(ARM_IP, ctx);
+ 
+ 	/* Restore caller-saved registers from stack */
+@@ -1547,7 +1569,7 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx)
+ 			rt = src_lo;
+ 			break;
+ 		}
+-		emit_udivmod(rd_lo, rd_lo, rt, ctx, BPF_OP(code));
++		emit_udivmod(rd_lo, rd_lo, rt, ctx, BPF_OP(code), off);
+ 		arm_bpf_put_reg32(dst_lo, rd_lo, ctx);
+ 		if (!ctx->prog->aux->verifier_zext)
+ 			emit_a32_mov_i(dst_hi, 0, ctx);
+diff --git a/arch/arm/net/bpf_jit_32.h b/arch/arm/net/bpf_jit_32.h
+index 79c7373fadce..438f0e1f91a0 100644
+--- a/arch/arm/net/bpf_jit_32.h
++++ b/arch/arm/net/bpf_jit_32.h
+@@ -139,6 +139,7 @@
+ #define ARM_INST_TST_I		0x03100000
+ 
+ #define ARM_INST_UDIV		0x0730f010
++#define ARM_INST_SDIV		0x0710f010
+ 
+ #define ARM_INST_UMULL		0x00800090
+ 
+@@ -267,6 +268,7 @@
+ #define ARM_TST_I(rn, imm)	_AL3_I(ARM_INST_TST, 0, rn, imm)
+ 
+ #define ARM_UDIV(rd, rn, rm)	(ARM_INST_UDIV | (rd) << 16 | (rn) | (rm) << 8)
++#define ARM_SDIV(rd, rn, rm)	(ARM_INST_SDIV | (rd) << 16 | (rn) | (rm) << 8)
+ 
+ #define ARM_UMULL(rd_lo, rd_hi, rn, rm)	(ARM_INST_UMULL | (rd_hi) << 16 \
+ 					 | (rd_lo) << 12 | (rm) << 8 | rn)
+-- 
+2.39.2
+

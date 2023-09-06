@@ -1,0 +1,90 @@
+From bcf0edc829b112b02c61ca9832b842f2db63b2ea Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+Date: Wed, 30 Aug 2023 08:40:08 +0000
+Subject: [PATCH bpf-next v2 7/8] selftest, bpf: enable cpu v4 tests for arm32
+
+Now that all the cpuv4 instructions are supported by the arm32 JIT,
+enable the selftests for arm32.
+
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+ tools/testing/selftests/bpf/progs/verifier_bswap.c | 3 ++-
+ tools/testing/selftests/bpf/progs/verifier_gotol.c | 3 ++-
+ tools/testing/selftests/bpf/progs/verifier_ldsx.c  | 3 ++-
+ tools/testing/selftests/bpf/progs/verifier_movsx.c | 3 ++-
+ tools/testing/selftests/bpf/progs/verifier_sdiv.c  | 3 ++-
+ 5 files changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/tools/testing/selftests/bpf/progs/verifier_bswap.c b/tools/testing/selftests/bpf/progs/verifier_bswap.c
+index 8893094725f0..5d54f8eae6a1 100644
+--- a/tools/testing/selftests/bpf/progs/verifier_bswap.c
++++ b/tools/testing/selftests/bpf/progs/verifier_bswap.c
+@@ -5,7 +5,8 @@
+ #include "bpf_misc.h"
+ 
+ #if (defined(__TARGET_ARCH_arm64) || defined(__TARGET_ARCH_x86) || \
+-     (defined(__TARGET_ARCH_riscv) && __riscv_xlen == 64)) && __clang_major__ >= 18
++	(defined(__TARGET_ARCH_riscv) && __riscv_xlen == 64) || defined(__TARGET_ARCH_arm)) && \
++	__clang_major__ >= 18
+ 
+ SEC("socket")
+ __description("BSWAP, 16")
+diff --git a/tools/testing/selftests/bpf/progs/verifier_gotol.c b/tools/testing/selftests/bpf/progs/verifier_gotol.c
+index 2dae5322a18e..aa54ecd5829e 100644
+--- a/tools/testing/selftests/bpf/progs/verifier_gotol.c
++++ b/tools/testing/selftests/bpf/progs/verifier_gotol.c
+@@ -5,7 +5,8 @@
+ #include "bpf_misc.h"
+ 
+ #if (defined(__TARGET_ARCH_arm64) || defined(__TARGET_ARCH_x86) || \
+-     (defined(__TARGET_ARCH_riscv) && __riscv_xlen == 64)) && __clang_major__ >= 18
++	(defined(__TARGET_ARCH_riscv) && __riscv_xlen == 64) || defined(__TARGET_ARCH_arm)) && \
++	__clang_major__ >= 18
+ 
+ SEC("socket")
+ __description("gotol, small_imm")
+diff --git a/tools/testing/selftests/bpf/progs/verifier_ldsx.c b/tools/testing/selftests/bpf/progs/verifier_ldsx.c
+index 0c638f45aaf1..1e1bc379c44f 100644
+--- a/tools/testing/selftests/bpf/progs/verifier_ldsx.c
++++ b/tools/testing/selftests/bpf/progs/verifier_ldsx.c
+@@ -5,7 +5,8 @@
+ #include "bpf_misc.h"
+ 
+ #if (defined(__TARGET_ARCH_arm64) || defined(__TARGET_ARCH_x86) || \
+-     (defined(__TARGET_ARCH_riscv) && __riscv_xlen == 64)) && __clang_major__ >= 18
++	(defined(__TARGET_ARCH_riscv) && __riscv_xlen == 64) || defined(__TARGET_ARCH_arm)) && \
++	__clang_major__ >= 18
+ 
+ SEC("socket")
+ __description("LDSX, S8")
+diff --git a/tools/testing/selftests/bpf/progs/verifier_movsx.c b/tools/testing/selftests/bpf/progs/verifier_movsx.c
+index 3c8ac2c57b1b..ca11fd5dafd1 100644
+--- a/tools/testing/selftests/bpf/progs/verifier_movsx.c
++++ b/tools/testing/selftests/bpf/progs/verifier_movsx.c
+@@ -5,7 +5,8 @@
+ #include "bpf_misc.h"
+ 
+ #if (defined(__TARGET_ARCH_arm64) || defined(__TARGET_ARCH_x86) || \
+-     (defined(__TARGET_ARCH_riscv) && __riscv_xlen == 64)) && __clang_major__ >= 18
++	(defined(__TARGET_ARCH_riscv) && __riscv_xlen == 64) || defined(__TARGET_ARCH_arm)) && \
++	__clang_major__ >= 18
+ 
+ SEC("socket")
+ __description("MOV32SX, S8")
+diff --git a/tools/testing/selftests/bpf/progs/verifier_sdiv.c b/tools/testing/selftests/bpf/progs/verifier_sdiv.c
+index 0990f8825675..fb039722b639 100644
+--- a/tools/testing/selftests/bpf/progs/verifier_sdiv.c
++++ b/tools/testing/selftests/bpf/progs/verifier_sdiv.c
+@@ -5,7 +5,8 @@
+ #include "bpf_misc.h"
+ 
+ #if (defined(__TARGET_ARCH_arm64) || defined(__TARGET_ARCH_x86) || \
+-     (defined(__TARGET_ARCH_riscv) && __riscv_xlen == 64)) && __clang_major__ >= 18
++	(defined(__TARGET_ARCH_riscv) && __riscv_xlen == 64) || defined(__TARGET_ARCH_arm)) && \
++	__clang_major__ >= 18
+ 
+ SEC("socket")
+ __description("SDIV32, non-zero imm divisor, check 1")
+-- 
+2.39.2
+
