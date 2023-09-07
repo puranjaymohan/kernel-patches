@@ -1,0 +1,33 @@
+From 69565f8d9b2b6ae9fa719c8bbfa78d24a4361959 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+Date: Thu, 7 Sep 2023 20:57:00 +0000
+Subject: [PATCH bpf-next v3 9/9] MAINTAINERS: Add myself for ARM32 BPF JIT
+ maintainer.
+
+As Shubham has been inactive since 2017, Add myself for ARM32 BPF JIT.
+
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+ MAINTAINERS | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 612d6d1dbf36..c241856819bd 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -3602,9 +3602,10 @@ F:	Documentation/devicetree/bindings/iio/accel/bosch,bma400.yaml
+ F:	drivers/iio/accel/bma400*
+ 
+ BPF JIT for ARM
+-M:	Shubham Bansal <illusionist.neo@gmail.com>
++M:	Puranjay Mohan <puranjay12@gmail.com>
++R:	Shubham Bansal <illusionist.neo@gmail.com>
+ L:	bpf@vger.kernel.org
+-S:	Odd Fixes
++S:	Maintained
+ F:	arch/arm/net/
+ 
+ BPF JIT for ARM64
+-- 
+2.39.2
+
