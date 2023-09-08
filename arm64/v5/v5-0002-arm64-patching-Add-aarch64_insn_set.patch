@@ -1,0 +1,83 @@
+From fda60408ef5186503d7e4fa98092103be4fe5acb Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+Date: Tue, 29 Aug 2023 11:53:30 +0000
+Subject: [PATCH bpf-next v5 2/3] arm64: patching: Add aarch64_insn_set()
+
+The BPF JIT needs to write invalid instructions to RX regions of memory
+to invalidate removed BPF programs. This needs a function like memset()
+that can work with RX memory.
+
+Implement aarch64_insn_set() which is similar to text_poke_set() of x86.
+
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+ arch/arm64/include/asm/patching.h |  1 +
+ arch/arm64/kernel/patching.c      | 40 +++++++++++++++++++++++++++++++
+ 2 files changed, 41 insertions(+)
+
+diff --git a/arch/arm64/include/asm/patching.h b/arch/arm64/include/asm/patching.h
+index f78a0409cbdb..551933338739 100644
+--- a/arch/arm64/include/asm/patching.h
++++ b/arch/arm64/include/asm/patching.h
+@@ -8,6 +8,7 @@ int aarch64_insn_read(void *addr, u32 *insnp);
+ int aarch64_insn_write(void *addr, u32 insn);
+ 
+ int aarch64_insn_write_literal_u64(void *addr, u64 val);
++int aarch64_insn_set(void *dst, const u32 insn, size_t len);
+ void *aarch64_insn_copy(void *dst, const void *src, size_t len);
+ 
+ int aarch64_insn_patch_text_nosync(void *addr, u32 insn);
+diff --git a/arch/arm64/kernel/patching.c b/arch/arm64/kernel/patching.c
+index 243d6ae8d2d8..63d9e0e77806 100644
+--- a/arch/arm64/kernel/patching.c
++++ b/arch/arm64/kernel/patching.c
+@@ -146,6 +146,46 @@ noinstr void *aarch64_insn_copy(void *dst, const void *src, size_t len)
+ 	return dst;
+ }
+ 
++/**
++ * aarch64_insn_set - memset for RX memory regions.
++ * @dst: address to modify
++ * @c: value to set
++ * @len: length of memory region.
++ *
++ * Useful for JITs to fill regions of RX memory with illegal instructions.
++ */
++noinstr int aarch64_insn_set(void *dst, const u32 insn, size_t len)
++{
++	unsigned long flags;
++	size_t patched = 0;
++	size_t size;
++	void *waddr;
++	void *ptr;
++
++	/* A64 instructions must be word aligned */
++	if ((uintptr_t)dst & 0x3)
++		return -EINVAL;
++
++	raw_spin_lock_irqsave(&patch_lock, flags);
++
++	while (patched < len) {
++		ptr = dst + patched;
++		size = min_t(size_t, PAGE_SIZE - offset_in_page(ptr),
++			     len - patched);
++
++		waddr = patch_map(ptr, FIX_TEXT_POKE0);
++		memset32(waddr, insn, size / 4);
++		patch_unmap(FIX_TEXT_POKE0);
++
++		patched += size;
++	}
++	raw_spin_unlock_irqrestore(&patch_lock, flags);
++
++	caches_clean_inval_pou((uintptr_t)dst, (uintptr_t)dst + len);
++
++	return 0;
++}
++
+ int __kprobes aarch64_insn_patch_text_nosync(void *addr, u32 insn)
+ {
+ 	u32 *tp = addr;
+-- 
+2.40.1
+
