@@ -1,0 +1,47 @@
+From e20705149193c737ec64e47c77fff7470772d6f5 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+Date: Mon, 11 Sep 2023 21:03:58 +0000
+Subject: [PATCH bpf-next 1/6] bpf, riscv32: Always zero extend for LDX with
+ B/W/H
+
+The JITs should not depend on the verifier for zero extending the upper
+32 bits of the destination register when loading a byte, half-word, or
+word.
+
+A following patch will make the verifier stop patching zext instructions
+after LDX.
+
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+ arch/riscv/net/bpf_jit_comp32.c | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/arch/riscv/net/bpf_jit_comp32.c b/arch/riscv/net/bpf_jit_comp32.c
+index 529a83b85c1c..8f8255519ba1 100644
+--- a/arch/riscv/net/bpf_jit_comp32.c
++++ b/arch/riscv/net/bpf_jit_comp32.c
+@@ -847,18 +847,15 @@ static int emit_load_r64(const s8 *dst, const s8 *src, s16 off,
+ 	switch (size) {
+ 	case BPF_B:
+ 		emit(rv_lbu(lo(rd), 0, RV_REG_T0), ctx);
+-		if (!ctx->prog->aux->verifier_zext)
+-			emit(rv_addi(hi(rd), RV_REG_ZERO, 0), ctx);
++		emit(rv_addi(hi(rd), RV_REG_ZERO, 0), ctx);
+ 		break;
+ 	case BPF_H:
+ 		emit(rv_lhu(lo(rd), 0, RV_REG_T0), ctx);
+-		if (!ctx->prog->aux->verifier_zext)
+-			emit(rv_addi(hi(rd), RV_REG_ZERO, 0), ctx);
++		emit(rv_addi(hi(rd), RV_REG_ZERO, 0), ctx);
+ 		break;
+ 	case BPF_W:
+ 		emit(rv_lw(lo(rd), 0, RV_REG_T0), ctx);
+-		if (!ctx->prog->aux->verifier_zext)
+-			emit(rv_addi(hi(rd), RV_REG_ZERO, 0), ctx);
++		emit(rv_addi(hi(rd), RV_REG_ZERO, 0), ctx);
+ 		break;
+ 	case BPF_DW:
+ 		emit(rv_lw(lo(rd), 0, RV_REG_T0), ctx);
+-- 
+2.39.2
+

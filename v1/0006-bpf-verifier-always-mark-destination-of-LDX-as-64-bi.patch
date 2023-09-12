@@ -1,0 +1,40 @@
+From f0e86232ee3ec29a60b62b0dbc027f19031f5675 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+Date: Mon, 11 Sep 2023 21:39:03 +0000
+Subject: [PATCH bpf-next 6/6] bpf, verifier: always mark destination of LDX as
+ 64-bit
+
+All 64-bit JITs utilize a single instruction to load + zero-extend a
+byte, word, or a half-word. The optimisation of emitting zext for LDX is
+not useful for most of the JITs.
+
+All the JITs that relied on the verifier for zero extension of LDX
+desitination registers have been modified to always zero extend the
+destination.
+
+Now the verifier can safely mark LDX destination as 64-bit and stop
+emitting zero-extension instructions for it.
+
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+ kernel/bpf/verifier.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/kernel/bpf/verifier.c b/kernel/bpf/verifier.c
+index dbba2b806017..02a1ac1a1327 100644
+--- a/kernel/bpf/verifier.c
++++ b/kernel/bpf/verifier.c
+@@ -3028,9 +3028,7 @@ static bool is_reg64(struct bpf_verifier_env *env, struct bpf_insn *insn,
+ 		return false;
+ 
+ 	if (class == BPF_LDX) {
+-		if (t != SRC_OP)
+-			return BPF_SIZE(code) == BPF_DW;
+-		/* LDX source must be ptr. */
++		/* LDX source must be a ptr. and LDX destination is always zero-extended. */
+ 		return true;
+ 	}
+ 
+-- 
+2.39.2
+

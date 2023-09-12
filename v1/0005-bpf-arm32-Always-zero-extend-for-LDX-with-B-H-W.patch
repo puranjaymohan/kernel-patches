@@ -1,0 +1,49 @@
+From 71e37f192314e1502cbb103bfa26c47223a17959 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+Date: Mon, 11 Sep 2023 21:03:58 +0000
+Subject: [PATCH bpf-next 5/6] bpf, arm32: Always zero extend for LDX with
+ B/H/W
+
+The JITs should not depend on the verifier for zero extending the upper
+32 bits of the destination register when loading a byte, half-word, or
+word.
+
+A following patch will make the verifier stop patching zext instructions
+after LDX.
+
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+ arch/arm/net/bpf_jit_32.c | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/net/bpf_jit_32.c b/arch/arm/net/bpf_jit_32.c
+index 6a1c9fca5260..757a99febba5 100644
+--- a/arch/arm/net/bpf_jit_32.c
++++ b/arch/arm/net/bpf_jit_32.c
+@@ -1081,20 +1081,17 @@ static inline void emit_ldx_r(const s8 dst[], const s8 src,
+ 	case BPF_B:
+ 		/* Load a Byte */
+ 		emit(ARM_LDRB_I(rd[1], rm, off), ctx);
+-		if (!ctx->prog->aux->verifier_zext)
+-			emit_a32_mov_i(rd[0], 0, ctx);
++		emit_a32_mov_i(rd[0], 0, ctx);
+ 		break;
+ 	case BPF_H:
+ 		/* Load a HalfWord */
+ 		emit(ARM_LDRH_I(rd[1], rm, off), ctx);
+-		if (!ctx->prog->aux->verifier_zext)
+-			emit_a32_mov_i(rd[0], 0, ctx);
++		emit_a32_mov_i(rd[0], 0, ctx);
+ 		break;
+ 	case BPF_W:
+ 		/* Load a Word */
+ 		emit(ARM_LDR_I(rd[1], rm, off), ctx);
+-		if (!ctx->prog->aux->verifier_zext)
+-			emit_a32_mov_i(rd[0], 0, ctx);
++		emit_a32_mov_i(rd[0], 0, ctx);
+ 		break;
+ 	case BPF_DW:
+ 		/* Load a Double Word */
+-- 
+2.39.2
+

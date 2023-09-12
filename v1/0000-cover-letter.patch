@@ -1,0 +1,82 @@
+From f0e86232ee3ec29a60b62b0dbc027f19031f5675 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+To: Alexei Starovoitov <ast@kernel.org>,
+  Daniel Borkmann <daniel@iogearbox.net>,
+  Andrii Nakryiko <andrii@kernel.org>,
+  Martin KaFai Lau <martin.lau@linux.dev>,
+  Song Liu <song@kernel.org>,
+  Yonghong Song <yonghong.song@linux.dev>,
+  John Fastabend <john.fastabend@gmail.com>,
+  KP Singh <kpsingh@kernel.org>,
+  Stanislav Fomichev <sdf@google.com>,
+  Hao Luo <haoluo@google.com>,
+  Jiri Olsa <jolsa@kernel.org>,
+  Shubham Bansal <illusionist.neo@gmail.com>,
+  Russell King <linux@armlinux.org.uk>,
+  "James E.J. Bottomley" <James.Bottomley@HansenPartnership.com>,
+  Helge Deller <deller@gmx.de>,
+  "Naveen N. Rao" <naveen.n.rao@linux.ibm.com>,
+  Michael Ellerman <mpe@ellerman.id.au>,
+  Nicholas Piggin <npiggin@gmail.com>,
+  Christophe Leroy <christophe.leroy@csgroup.eu>,
+  Luke Nelson <luke.r.nels@gmail.com>,
+  Xi Wang <xi.wang@gmail.com>,
+  Paul Walmsley <paul.walmsley@sifive.com>,
+  Palmer Dabbelt <palmer@dabbelt.com>,
+  Albert Ou <aou@eecs.berkeley.edu>,
+  Wang YanQing <udknight@gmail.com>,
+  bpf@vger.kernel.org,
+  linux-arm-kernel@lists.infradead.org,
+  linux-kernel@vger.kernel.org,
+  linux-parisc@vger.kernel.org,
+  linuxppc-dev@lists.ozlabs.org,
+  linux-riscv@lists.infradead.org,
+  netdev@vger.kernel.org
+Date: Tue, 12 Sep 2023 21:55:46 +0000
+Subject: [PATCH bpf-next 0/6] bpf: verifier: stop emitting zext for LDX
+
+All 64-bit architectures that support the BPF JIT do LDX + zero extension
+with a single CPU instruction. Some 64-bit architectures like riscv64,
+s390, mips64, etc. have bpf_jit_needs_zext() -> true. This means although
+these architectures do LDX + zero extension with a single CPU instruction,
+the verifier emits extra zero extension instructions after LDX | B/H/W.
+
+After a discussion about this in [1], it was decided that the verifier
+should not emit zext instructions for LDX and all JITs that can't do a LDX
++ zero extension with a single instruction should emit two instructions by
+default for LDX.
+
+All 32 bit JITs checked for ctx->prog->aux->verifier_zext and did not do
+explicit zero extension after LDX if this is set by the verifier.
+
+This patch series changes all applicable 32-bit JITs to always do a zero
+extension after LDX without checking ctx->prog->aux->verifier_zext.
+
+The last patch modifies the verifier to always mark the destination of LDX
+as 64 bit which in turn stops the verifier from emitting zext after LDX.
+
+These changes have not been tested because I don't have the hardware to do
+so, I would request the JIT maintainers to help me test this. Especially,
+the powerpc32 JTI where amount of code change is more.
+
+[1] https://lore.kernel.org/all/CANk7y0j2f-gPgZwd+YfTL71-6wfvky+f=kBC_ccqsS0EHAysyA@mail.gmail.com/
+
+Puranjay Mohan (6):
+  bpf, riscv32: Always zero extend for LDX with B/W/H
+  bpf, x86-32: Always zero extend for LDX with B/W/H
+  bpf, parisc32: Always zero extend for LDX with B/W/H
+  bpf, powerpc32: Always zero extend for LDX
+  bpf, arm32: Always zero extend for LDX with B/H/W
+  bpf, verifier: always mark destination of LDX as 64-bit
+
+ arch/arm/net/bpf_jit_32.c         |  9 +++------
+ arch/parisc/net/bpf_jit_comp32.c  |  9 +++------
+ arch/powerpc/net/bpf_jit_comp32.c | 25 ++++++++-----------------
+ arch/riscv/net/bpf_jit_comp32.c   |  9 +++------
+ arch/x86/net/bpf_jit_comp32.c     |  2 --
+ kernel/bpf/verifier.c             |  4 +---
+ 6 files changed, 18 insertions(+), 40 deletions(-)
+
+-- 
+2.39.2
+
