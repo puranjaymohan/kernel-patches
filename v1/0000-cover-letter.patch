@@ -1,0 +1,153 @@
+From 918f999a771c14b3eb3ee5cecc04328f8eb1adf1 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+To: Alexei Starovoitov <ast@kernel.org>,
+  Daniel Borkmann <daniel@iogearbox.net>,
+  Andrii Nakryiko <andrii@kernel.org>,
+  Martin KaFai Lau <martin.lau@linux.dev>,
+  Song Liu <song@kernel.org>,
+  Yonghong Song <yonghong.song@linux.dev>,
+  John Fastabend <john.fastabend@gmail.com>,
+  KP Singh <kpsingh@kernel.org>,
+  Stanislav Fomichev <sdf@google.com>,
+  Hao Luo <haoluo@google.com>,
+  Jiri Olsa <jolsa@kernel.org>,
+  Zi Shen Lim <zlim.lnx@gmail.com>,
+  Catalin Marinas <catalin.marinas@arm.com>,
+  Will Deacon <will@kernel.org>,
+  bpf@vger.kernel.org,
+  linux-arm-kernel@lists.infradead.org,
+  linux-kernel@vger.kernel.org
+Date: Tue, 12 Sep 2023 23:22:27 +0000
+Subject: [PATCH bpf-next 0/1] bpf, arm64: support exceptions
+
+Kumar is working on adding exceptions to BPF and enabling it on x86 [1].
+I am working with him to enable it on ARM64 and will later do it for
+other architectures when the basic exceptions support is upstream.
+
+This patch enables the support on ARM64, all sefltests are passing:
+
+# ./test_progs -a exceptions
+#74/1    exceptions/exception_throw_always_1:OK
+#74/2    exceptions/exception_throw_always_2:OK
+#74/3    exceptions/exception_throw_unwind_1:OK
+#74/4    exceptions/exception_throw_unwind_2:OK
+#74/5    exceptions/exception_throw_default:OK
+#74/6    exceptions/exception_throw_default_value:OK
+#74/7    exceptions/exception_tail_call:OK
+#74/8    exceptions/exception_ext:OK
+#74/9    exceptions/exception_ext_mod_cb_runtime:OK
+#74/10   exceptions/exception_throw_subprog:OK
+#74/11   exceptions/exception_assert_nz_gfunc:OK
+#74/12   exceptions/exception_assert_zero_gfunc:OK
+#74/13   exceptions/exception_assert_neg_gfunc:OK
+#74/14   exceptions/exception_assert_pos_gfunc:OK
+#74/15   exceptions/exception_assert_negeq_gfunc:OK
+#74/16   exceptions/exception_assert_poseq_gfunc:OK
+#74/17   exceptions/exception_assert_nz_gfunc_with:OK
+#74/18   exceptions/exception_assert_zero_gfunc_with:OK
+#74/19   exceptions/exception_assert_neg_gfunc_with:OK
+#74/20   exceptions/exception_assert_pos_gfunc_with:OK
+#74/21   exceptions/exception_assert_negeq_gfunc_with:OK
+#74/22   exceptions/exception_assert_poseq_gfunc_with:OK
+#74/23   exceptions/exception_bad_assert_nz_gfunc:OK
+#74/24   exceptions/exception_bad_assert_zero_gfunc:OK
+#74/25   exceptions/exception_bad_assert_neg_gfunc:OK
+#74/26   exceptions/exception_bad_assert_pos_gfunc:OK
+#74/27   exceptions/exception_bad_assert_negeq_gfunc:OK
+#74/28   exceptions/exception_bad_assert_poseq_gfunc:OK
+#74/29   exceptions/exception_bad_assert_nz_gfunc_with:OK
+#74/30   exceptions/exception_bad_assert_zero_gfunc_with:OK
+#74/31   exceptions/exception_bad_assert_neg_gfunc_with:OK
+#74/32   exceptions/exception_bad_assert_pos_gfunc_with:OK
+#74/33   exceptions/exception_bad_assert_negeq_gfunc_with:OK
+#74/34   exceptions/exception_bad_assert_poseq_gfunc_with:OK
+#74/35   exceptions/exception_assert_range:OK
+#74/36   exceptions/exception_assert_range_with:OK
+#74/37   exceptions/exception_bad_assert_range:OK
+#74/38   exceptions/exception_bad_assert_range_with:OK
+#74/39   exceptions/non-throwing fentry -> exception_cb:OK
+#74/40   exceptions/throwing fentry -> exception_cb:OK
+#74/41   exceptions/non-throwing fexit -> exception_cb:OK
+#74/42   exceptions/throwing fexit -> exception_cb:OK
+#74/43   exceptions/throwing extension (with custom cb) -> exception_cb:OK
+#74/44   exceptions/throwing extension -> global func in exception_cb:OK
+#74/45   exceptions/exception_ext_mod_cb_runtime:OK
+#74/46   exceptions/throwing extension (with custom cb) -> global func in exception_cb:OK
+#74/47   exceptions/exception_ext:OK
+#74/48   exceptions/non-throwing fentry -> non-throwing subprog:OK
+#74/49   exceptions/throwing fentry -> non-throwing subprog:OK
+#74/50   exceptions/non-throwing fentry -> throwing subprog:OK
+#74/51   exceptions/throwing fentry -> throwing subprog:OK
+#74/52   exceptions/non-throwing fexit -> non-throwing subprog:OK
+#74/53   exceptions/throwing fexit -> non-throwing subprog:OK
+#74/54   exceptions/non-throwing fexit -> throwing subprog:OK
+#74/55   exceptions/throwing fexit -> throwing subprog:OK
+#74/56   exceptions/non-throwing fmod_ret -> non-throwing subprog:OK
+#74/57   exceptions/non-throwing fmod_ret -> non-throwing global subprog:OK
+#74/58   exceptions/non-throwing extension -> non-throwing subprog:OK
+#74/59   exceptions/non-throwing extension -> throwing subprog:OK
+#74/60   exceptions/non-throwing extension -> non-throwing subprog:OK
+#74/61   exceptions/non-throwing extension -> throwing global subprog:OK
+#74/62   exceptions/throwing extension -> throwing global subprog:OK
+#74/63   exceptions/throwing extension -> non-throwing global subprog:OK
+#74/64   exceptions/non-throwing extension -> main subprog:OK
+#74/65   exceptions/throwing extension -> main subprog:OK
+#74/66   exceptions/reject_exception_cb_type_1:OK
+#74/67   exceptions/reject_exception_cb_type_2:OK
+#74/68   exceptions/reject_exception_cb_type_3:OK
+#74/69   exceptions/reject_exception_cb_type_4:OK
+#74/70   exceptions/reject_async_callback_throw:OK
+#74/71   exceptions/reject_with_lock:OK
+#74/72   exceptions/reject_subprog_with_lock:OK
+#74/73   exceptions/reject_with_rcu_read_lock:OK
+#74/74   exceptions/reject_subprog_with_rcu_read_lock:OK
+#74/75   exceptions/reject_with_rbtree_add_throw:OK
+#74/76   exceptions/reject_with_reference:OK
+#74/77   exceptions/reject_with_cb_reference:OK
+#74/78   exceptions/reject_with_cb:OK
+#74/79   exceptions/reject_with_subprog_reference:OK
+#74/80   exceptions/reject_throwing_exception_cb:OK
+#74/81   exceptions/reject_exception_cb_call_global_func:OK
+#74/82   exceptions/reject_exception_cb_call_static_func:OK
+#74/83   exceptions/reject_multiple_exception_cb:OK
+#74/84   exceptions/reject_exception_throw_cb:OK
+#74/85   exceptions/reject_exception_throw_cb_diff:OK
+#74/86   exceptions/reject_set_exception_cb_bad_ret1:OK
+#74/87   exceptions/reject_set_exception_cb_bad_ret2:OK
+#74/88   exceptions/check_assert_eq_int_min:OK
+#74/89   exceptions/check_assert_eq_int_max:OK
+#74/90   exceptions/check_assert_eq_zero:OK
+#74/91   exceptions/check_assert_eq_llong_min:OK
+#74/92   exceptions/check_assert_eq_llong_max:OK
+#74/93   exceptions/check_assert_lt_pos:OK
+#74/94   exceptions/check_assert_lt_zero:OK
+#74/95   exceptions/check_assert_lt_neg:OK
+#74/96   exceptions/check_assert_le_pos:OK
+#74/97   exceptions/check_assert_le_zero:OK
+#74/98   exceptions/check_assert_le_neg:OK
+#74/99   exceptions/check_assert_gt_pos:OK
+#74/100  exceptions/check_assert_gt_zero:OK
+#74/101  exceptions/check_assert_gt_neg:OK
+#74/102  exceptions/check_assert_ge_pos:OK
+#74/103  exceptions/check_assert_ge_zero:OK
+#74/104  exceptions/check_assert_ge_neg:OK
+#74/105  exceptions/check_assert_range_s64:OK
+#74/106  exceptions/check_assert_range_u64:OK
+#74/107  exceptions/check_assert_single_range_s64:OK
+#74/108  exceptions/check_assert_single_range_u64:OK
+#74/109  exceptions/check_assert_generic:OK
+#74/110  exceptions/check_assert_with_return:OK
+#74      exceptions:OK
+Summary: 1/110 PASSED, 0 SKIPPED, 0 FAILED
+
+[1] https://lore.kernel.org/bpf/20230912233214.1518551-1-memxor@gmail.com/
+
+Puranjay Mohan (1):
+  bpf, arm64: support exceptions
+
+ arch/arm64/net/bpf_jit_comp.c | 98 ++++++++++++++++++++++++++++-------
+ 1 file changed, 79 insertions(+), 19 deletions(-)
+
+-- 
+2.40.1
+
