@@ -1,0 +1,64 @@
+From 178f8678dcbdc9494dbf4fe31245e5b8b8f7a208 Mon Sep 17 00:00:00 2001
+From: EC2 Default User <ec2-user@ip-172-31-33-2.eu-west-1.compute.internal>
+Date: Thu, 29 Feb 2024 12:27:37 +0000
+Subject: [PATCH] Support DYNAMIC_FTRACE_WITH_ARGS with CFI_CLANG
+
+Signed-off-by: EC2 Default User <ec2-user@ip-172-31-33-2.eu-west-1.compute.internal>
+---
+ llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp    |  6 +++---
+ llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp | 11 +----------
+ 2 files changed, 4 insertions(+), 13 deletions(-)
+
+diff --git a/llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp b/llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp
+index e89a1c26c..f1ca33c26 100644
+--- a/llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp
++++ b/llvm/lib/CodeGen/AsmPrinter/AsmPrinter.cpp
+@@ -982,9 +982,6 @@ void AsmPrinter::emitFunctionHeader() {
+     }
+   }
+ 
+-  // Emit KCFI type information before patchable-function-prefix nops.
+-  emitKCFITypeId(*MF);
+-
+   // Emit M NOPs for -fpatchable-function-entry=N,M where M>0. We arbitrarily
+   // place prefix data before NOPs.
+   unsigned PatchableFunctionPrefix = 0;
+@@ -1006,6 +1003,9 @@ void AsmPrinter::emitFunctionHeader() {
+     CurrentPatchableFunctionEntrySym = CurrentFnBegin;
+   }
+ 
++  // Emit KCFI type information before patchable-function-prefix nops.
++  emitKCFITypeId(*MF);
++  
+   // Emit the function prologue data for the indirect call sanitizer.
+   if (const MDNode *MD = F.getMetadata(LLVMContext::MD_func_sanitize)) {
+     assert(MD->getNumOperands() == 2);
+diff --git a/llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp b/llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp
+index 4fa719ad6..678a38a6a 100644
+--- a/llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp
++++ b/llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp
+@@ -474,20 +474,11 @@ void AArch64AsmPrinter::LowerKCFI_CHECK(const MachineInstr &MI) {
+     assert(ScratchRegs[0] != AddrReg && ScratchRegs[1] != AddrReg &&
+            "Invalid scratch registers for KCFI_CHECK");
+ 
+-    // Adjust the offset for patchable-function-prefix. This assumes that
+-    // patchable-function-prefix is the same for all functions.
+-    int64_t PrefixNops = 0;
+-    (void)MI.getMF()
+-        ->getFunction()
+-        .getFnAttribute("patchable-function-prefix")
+-        .getValueAsString()
+-        .getAsInteger(10, PrefixNops);
+-
+     // Load the target function type hash.
+     EmitToStreamer(*OutStreamer, MCInstBuilder(AArch64::LDURWi)
+                                      .addReg(ScratchRegs[0])
+                                      .addReg(AddrReg)
+-                                     .addImm(-(PrefixNops * 4 + 4)));
++                                     .addImm(-4));
+   }
+ 
+   // Load the expected type hash.
+-- 
+2.40.1
+

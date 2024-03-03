@@ -1,0 +1,76 @@
+From 32f216c3e32902102a085fa6a1476b0cca09be5a Mon Sep 17 00:00:00 2001
+From: EC2 Default User <ec2-user@ip-172-31-33-2.eu-west-1.compute.internal>
+Date: Thu, 29 Feb 2024 12:26:40 +0000
+Subject: [PATCH] Support DYNAMIC_FTRACE_WITH_ARGS with CFI_CLANG
+
+Signed-off-by: EC2 Default User <ec2-user@ip-172-31-33-2.eu-west-1.compute.internal>
+---
+ arch/arm64/Kconfig               | 2 +-
+ arch/arm64/kernel/entry-ftrace.S | 9 +++++++++
+ arch/arm64/kernel/ftrace.c       | 8 ++++++++
+ 3 files changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index aa7c1d435..979c290e6 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -197,7 +197,7 @@ config ARM64
+ 	select HAVE_DYNAMIC_FTRACE_WITH_DIRECT_CALLS \
+ 		if DYNAMIC_FTRACE_WITH_ARGS && DYNAMIC_FTRACE_WITH_CALL_OPS
+ 	select HAVE_DYNAMIC_FTRACE_WITH_CALL_OPS \
+-		if (DYNAMIC_FTRACE_WITH_ARGS && !CFI_CLANG && \
++		if (DYNAMIC_FTRACE_WITH_ARGS && \
+ 		    !CC_OPTIMIZE_FOR_SIZE)
+ 	select FTRACE_MCOUNT_USE_PATCHABLE_FUNCTION_ENTRY \
+ 		if DYNAMIC_FTRACE_WITH_ARGS
+diff --git a/arch/arm64/kernel/entry-ftrace.S b/arch/arm64/kernel/entry-ftrace.S
+index f0c16640e..90a0bfeda 100644
+--- a/arch/arm64/kernel/entry-ftrace.S
++++ b/arch/arm64/kernel/entry-ftrace.S
+@@ -49,7 +49,16 @@ SYM_CODE_START(ftrace_caller)
+ 	 * LDR.
+ 	 */
+ 	bic	x11, x30, 0x7
++
++	/*
++	 * When CFI_CLANG is enabled, the kCFI hash is placed below the two
++	 * pre function nops, we need to account for that to find the literal.
++	 */
++#ifdef CONFIG_CFI_CLANG
++	ldr	x11, [x11, #-(5 * AARCH64_INSN_SIZE)]		// op
++#elif
+ 	ldr	x11, [x11, #-(4 * AARCH64_INSN_SIZE)]		// op
++#endif
+ 
+ #ifdef CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS
+ 	/*
+diff --git a/arch/arm64/kernel/ftrace.c b/arch/arm64/kernel/ftrace.c
+index a650f5e11..ed7a86b31 100644
+--- a/arch/arm64/kernel/ftrace.c
++++ b/arch/arm64/kernel/ftrace.c
+@@ -125,6 +125,10 @@ unsigned long ftrace_call_adjust(unsigned long addr)
+ 	/* Skip the NOPs placed before the function entry point */
+ 	addr += 2 * AARCH64_INSN_SIZE;
+ 
++	/* Skip the hash in case of CLANG_CFI */
++	if (IS_ENABLED(CONFIG_CFI_CLANG))
++		addr += AARCH64_INSN_SIZE;
++
+ 	/* Skip any BTI */
+ 	if (IS_ENABLED(CONFIG_ARM64_BTI_KERNEL)) {
+ 		u32 insn = le32_to_cpu(*(__le32 *)addr);
+@@ -299,7 +303,11 @@ static const struct ftrace_ops *arm64_rec_get_ops(struct dyn_ftrace *rec)
+ static int ftrace_rec_set_ops(const struct dyn_ftrace *rec,
+ 			      const struct ftrace_ops *ops)
+ {
++#ifdef CONFIG_CFI_CLANG
++	unsigned long literal = ALIGN_DOWN(rec->ip - 16, 8);
++#elif
+ 	unsigned long literal = ALIGN_DOWN(rec->ip - 12, 8);
++#endif
+ 	return aarch64_insn_write_literal_u64((void *)literal,
+ 					      (unsigned long)ops);
+ }
+-- 
+2.40.1
+

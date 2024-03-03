@@ -1,0 +1,8 @@
+ffff80008001aa58:       d503201f        nop
+ffff80008001aa5c:       d503201f        nop
+
+ffff80008001aa60 <do_interrupt_handler>:
+ffff80008001aa60:       d503245f        bti     c
+ffff80008001aa64:       d503201f        nop
+ffff80008001aa68:       d503201f        nop
+

@@ -1,0 +1,70 @@
+From 69b0706de1639038e7a009825460cfe4b8e457d8 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+Date: Thu, 29 Feb 2024 22:53:12 +0000
+Subject: [PATCH] arm64: prohibit probing on arch_kunwind_consume_entry()
+
+Make arch_kunwind_consume_entry() as __always_inline otherwise the
+compiler might not inline it and allow attaching probes to it.
+
+Without this, just probing arch_kunwind_consume_entry() via
+<tracefs>/kprobe_events will crash the kernel on arm64.
+
+The crash can be reproduced using the following compiler and kernel
+combination:
+clang version 19.0.0git (https://github.com/llvm/llvm-project.git d68d29516102252f6bf6dc23fb22cef144ca1cb3)
+commit 87adedeba51a ("Merge tag 'net-6.8-rc7' of git://git.kernel.org/pub/scm/linux/kernel/git/netdev/net")
+
+ [root@localhost ~]# echo 'p arch_kunwind_consume_entry' > /sys/kernel/debug/tracing/kprobe_events
+ [root@localhost ~]# echo 1 > /sys/kernel/debug/tracing/events/kprobes/enable
+
+ Modules linked in: aes_ce_blk aes_ce_cipher ghash_ce sha2_ce virtio_net sha256_arm64 sha1_ce arm_smccc_trng net_failover failover virtio_mmio uio_pdrv_genirq uio sch_fq_codel dm_mod dax configfs
+ CPU: 3 PID: 1405 Comm: bash Not tainted 6.8.0-rc6+ #14
+ Hardware name: linux,dummy-virt (DT)
+ pstate: 604003c5 (nZCv DAIF +PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+ pc : kprobe_breakpoint_handler+0x17c/0x258
+ lr : kprobe_breakpoint_handler+0x17c/0x258
+ sp : ffff800085d6ab60
+ x29: ffff800085d6ab60 x28: ffff0000066f0040 x27: ffff0000066f0b20
+ x26: ffff800081fa7b0c x25: 0000000000000002 x24: ffff00000b29bd18
+ x23: ffff00007904c590 x22: ffff800081fa6590 x21: ffff800081fa6588
+ x20: ffff00000b29bd18 x19: ffff800085d6ac40 x18: 0000000000000079
+ x17: 0000000000000001 x16: ffffffffffffffff x15: 0000000000000004
+ x14: ffff80008277a940 x13: 0000000000000003 x12: 0000000000000003
+ x11: 00000000fffeffff x10: c0000000fffeffff x9 : aa95616fdf80cc00
+ x8 : aa95616fdf80cc00 x7 : 205d343137373231 x6 : ffff800080fb48ec
+ x5 : 0000000000000000 x4 : 0000000000000001 x3 : 0000000000000000
+ x2 : 0000000000000000 x1 : ffff800085d6a910 x0 : 0000000000000079
+ Call trace:
+ kprobes: Failed to recover from reentered kprobes.
+ kprobes: Dump kprobe:
+ .symbol_name = arch_kunwind_consume_entry, .offset = 0, .addr = arch_kunwind_consume_entry+0x0/0x40
+ ------------[ cut here ]------------
+ kernel BUG at arch/arm64/kernel/probes/kprobes.c:241!
+ kprobes: Failed to recover from reentered kprobes.
+ kprobes: Dump kprobe:
+ .symbol_name = arch_kunwind_consume_entry, .offset = 0, .addr = arch_kunwind_consume_entry+0x0/0x40
+
+Fixes: 1aba06e7b2b49 ("arm64: stacktrace: factor out kunwind_stack_walk()")
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+ arch/arm64/kernel/stacktrace.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/kernel/stacktrace.c b/arch/arm64/kernel/stacktrace.c
+index 7f88028a00c0..b2a60e0bcfd2 100644
+--- a/arch/arm64/kernel/stacktrace.c
++++ b/arch/arm64/kernel/stacktrace.c
+@@ -247,7 +247,7 @@ struct kunwind_consume_entry_data {
+ 	void *cookie;
+ };
+ 
+-static bool
++static __always_inline bool
+ arch_kunwind_consume_entry(const struct kunwind_state *state, void *cookie)
+ {
+ 	struct kunwind_consume_entry_data *data = cookie;
+
+base-commit: 87adedeba51a822533649b143232418b9e26d08b
+-- 
+2.40.1
+

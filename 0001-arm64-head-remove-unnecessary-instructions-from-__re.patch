@@ -1,0 +1,43 @@
+From 991f26fba2f2f2c433ac107786c6173fe4b317e2 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+Date: Sat, 2 Mar 2024 14:14:14 +0000
+Subject: [PATCH] arm64: head: remove unnecessary instructions from
+ __relocate_kernel
+
+Formerly, we had to access the RELA and RELR tables via the kernel
+mapping that was being relocated, and so deriving the start and end
+addresses was done by loading __rela_offset in x9 and then adding the
+actual virtual offset of the kernel to it.
+
+d7bea550279d ("arm64: head: use relative references to the RELA and RELR
+tables") changed this to load the entries via the ID map as we map the
+entire kernel image via the ID map.
+
+The two instructions for finding the actual virtual offset were left by
+that commit, so remove them now as they are unnecessary and add runtime
+overhead.
+
+Fixes: d7bea550279d ("arm64: head: use relative references to the RELA and RELR tables")
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+ arch/arm64/kernel/head.S | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/arch/arm64/kernel/head.S b/arch/arm64/kernel/head.S
+index cab7f91949d8..90db196f7c19 100644
+--- a/arch/arm64/kernel/head.S
++++ b/arch/arm64/kernel/head.S
+@@ -787,8 +787,6 @@ SYM_FUNC_START_LOCAL(__relocate_kernel)
+ 	 */
+ 	adr_l	x9, __rela_start
+ 	adr_l	x10, __rela_end
+-	mov_q	x11, KIMAGE_VADDR		// default virtual offset
+-	add	x11, x11, x23			// actual virtual offset
+ 
+ 0:	cmp	x9, x10
+ 	b.hs	1f
+
+base-commit: 5ad3cb0ed525b80c7f66c32b49a68c1f3510bec9
+-- 
+2.42.0
+
