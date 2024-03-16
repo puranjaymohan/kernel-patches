@@ -1,0 +1,45 @@
+From 72374fc5efb370353837762307ca14059e3dc098 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+To: Alexei Starovoitov <ast@kernel.org>, Daniel Borkmann <daniel@iogearbox.net>, John Fastabend <john.fastabend@gmail.com>, Andrii Nakryiko <andrii@kernel.org>, Martin KaFai Lau <martin.lau@linux.dev>, Eduard Zingerman <eddyz87@gmail.com>, Song Liu <song@kernel.org>, Yonghong Song <yonghong.song@linux.dev>, KP Singh <kpsingh@kernel.org>, Stanislav Fomichev <sdf@google.com>, Hao Luo <haoluo@google.com>, Jiri Olsa <jolsa@kernel.org>, bpf@vger.kernel.org, linux-kernel@vger.kernel.org, Catalin Marinas <catalin.marinas@arm.com>, Will Deacon <will@kernel.org>, Zi Shen Lim <zlim.lnx@gmail.com>, Xu Kuohai <xukuohai@huawei.com>
+Date: Thu, 14 Mar 2024 14:31:39 +0000
+Subject: [PATCH bpf-next 0/2] bpf,arm64: Add support for BPF Arena
+
+This series adds the support for PROBE_MEM32 and bpf_addr_space_cast
+instructions to the ARM64 BPF JIT. These two instructions allow the
+enablement of BPF Arena.
+
+All arena related selftests are passing.
+
+  [root@ip-172-31-6-62 bpf]# ./test_progs -a "*arena*"
+  #3/1     arena_htab/arena_htab_llvm:OK
+  #3/2     arena_htab/arena_htab_asm:OK
+  #3       arena_htab:OK
+  #4/1     arena_list/arena_list_1:OK
+  #4/2     arena_list/arena_list_1000:OK
+  #4       arena_list:OK
+  #434/1   verifier_arena/basic_alloc1:OK
+  #434/2   verifier_arena/basic_alloc2:OK
+  #434/3   verifier_arena/basic_alloc3:OK
+  #434/4   verifier_arena/iter_maps1:OK
+  #434/5   verifier_arena/iter_maps2:OK
+  #434/6   verifier_arena/iter_maps3:OK
+  #434     verifier_arena:OK
+  Summary: 3/10 PASSED, 0 SKIPPED, 0 FAILED
+
+The implementation of bpf_addr_space_cast can be optimised by using ROR
+(immediate) and CSEL instructions. Currently, lib/insn.c doesn't have APIs
+to generate these intructions. I will send subsequent patches to implement
+the APIs and then use these instructions in the JIT.
+
+Puranjay Mohan (2):
+  bpf: Add arm64 JIT support for PROBE_MEM32 pseudo instructions.
+  bpf: Add arm64 JIT support for bpf_addr_space_cast instruction.
+
+ arch/arm64/net/bpf_jit.h                     |   1 +
+ arch/arm64/net/bpf_jit_comp.c                | 105 +++++++++++++++++--
+ tools/testing/selftests/bpf/DENYLIST.aarch64 |   2 -
+ 3 files changed, 96 insertions(+), 12 deletions(-)
+
+-- 
+2.40.1
+
