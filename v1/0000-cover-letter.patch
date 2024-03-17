@@ -1,0 +1,203 @@
+From e64b946e9132b8ff6bc1a27fe4782053c670eb30 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+To: Alexei Starovoitov <alexei.starovoitov@gmail.com>,
+  KP Singh <kpsingh@kernel.org>,
+  Daniel Borkmann <daniel@iogearbox.net>,
+  Andrii Nakryiko <andrii@kernel.org>,
+  inwardvessel <inwardvessel@gmail.com>,
+  leitao@debian.org
+Date: Sat, 16 Mar 2024 19:11:32 +0000
+Subject: [OFFLIST PATCH bpf-next 0/1] bpf: prevent userspace memory access
+
+This patch make the verifier add checks around loads from untrusted
+pointers and skips the loads if the address (src_reg + off) falls in the
+userspace memory region.
+
+The implementation is comparing the upper 32 bits of the load address and
+the userspace boundary, all loads in the range 0 to userpace boundary + 4GB
+are skipped.
+
+Rejecting this extra 4GB above userspace addresses is acceptable because
+there is a large hole between userspace and kernel memory region and any
+bpf program should not access this 4GB memory above userspace in normal
+operation.
+
+Here is some analysis on various JITs with this patch applied:
+
+We use the following fentry program that is derefrencing a unstrusted pointer.
+This pointer could have an address that falls in the userspace range, the
+verfier will add instructions around the load to skip the load if src_reg + off
+is a userspace address.
+
+  SEC("fentry/tcp_v4_connect")
+  int BPF_PROG(fentry_tcp_v4_connect, struct sock *sk)
+  {
+                *(volatile long *)sk;
+                return 0;
+  }
+
+
+      BPF Program before              |          BPF Program after
+      ------------------                         -----------------
+
+                                    0: (79) r1 = *(u64 *)(r1 +0)
+                                   ---------------------------------
+                                  / 1: (bf) r11 = r1
+                                 /  2: (07) r11 += 0
+                                /   3: (77) r11 >>= 32
+  0: (79) r1 = *(u64 *)(r1 +0) /    4: (17) r11 -= 32768
+  ----------------------------/     5: (d5) if r11 s<= 0x0 goto pc+2
+  1: (79) r1 = *(u64 *)(r1 +0) ---> 6: (79) r1 = *(u64 *)(r1 +0)
+  ----------------------------\     7: (05) goto pc+1
+  2: (b7) r0 = 0               \    8: (b7) r1 = 0
+  3: (95) exit                  ------------------------------------
+                                    9: (b7) r0 = 0
+                                    10: (95) exit
+
+
+There are 7 extra BPF instructions added by the verifier to protect against
+userspace memory access
+
+Now, we analyse the same program after it has gone through the JITs of X86-64,
+ARM64, and RISC-V architectures. We follow the single load instruction that has
+the untrusted pointer and see what instrumentation has been added around it.
+
+
+
+
+                                x86-64 JIT
+                                ==========
+     JIT's Instrumentation                  Verifier's Instrumentation
+          (upstream)                               (This patch)
+     --------------------                   --------------------------
+
+
+   0:   nopl   0x0(%rax,%rax,1)            0:   nopl   0x0(%rax,%rax,1)
+   5:   xchg   %ax,%ax                     5:   xchg   %ax,%ax
+   7:   push   %rbp                        7:   push   %rbp
+   8:   mov    %rsp,%rbp                   8:   mov    %rsp,%rbp
+   b:   mov    0x0(%rdi),%rdi              b:   mov    0x0(%rdi),%rdi
+--------------------------------------------------------------------------
+   f:   movabs $0x800000000000,%r11        f:   mov    %rdi,%r10
+  19:   cmp    %r11,%rdi                  12:   add    $0x0,%r10
+  1c:   jb     0x000000000000002a         16:   shr    $0x20,%r10
+  1e:   mov    %rdi,%r11                  1a:   sub    $0x8000,%r10
+  21:   add    $0x0,%r11                  21:   test   %r10,%r10
+  28:   jae    0x000000000000002e         24:   jle    0x000000000000002c
+  2a:   xor    %edi,%edi            /---> 26:   mov    0x0(%rdi),%rdi
+  2c:   jmp    0x0000000000000032  /      2a:   jmp    0x000000000000002e
+  2e:   mov    0x0(%rdi),%rdi  ---/       2c:   xor    %edi,%edi
+--------------------------------------------------------------------------
+  32:   xor    %eax,%eax                  2e:   xor    %eax,%eax
+  34:   leave                             30:   leave
+  35:   ret                               31:   ret
+
+The X86-64 JIT already emits some instructions around untrusted loads, the
+implementation proposed in this patch emits similar number of instructions.
+
+
+
+                                  ARM64 JIT
+                                  =========
+
+
+        No Intrumentation                       Verifier's Instrumentation
+           (upstream)                                  (This patch)
+        -----------------                       --------------------------
+
+
+                                           0:   add     x9, x30, #0x0
+                                           4:   nop
+                                           8:   paciasp
+                                           c:   stp     x29, x30, [sp, #-16]!
+                                          10:   mov     x29, sp
+                                          14:   stp     x19, x20, [sp, #-16]!
+   0:   add     x9, x30, #0x0             18:   stp     x21, x22, [sp, #-16]!
+   4:   nop                               1c:   stp     x25, x26, [sp, #-16]!
+   8:   paciasp                           20:   stp     x27, x28, [sp, #-16]!
+   c:   stp     x29, x30, [sp, #-16]!     24:   mov     x25, sp
+  10:   mov     x29, sp                   28:   mov     x26, #0x0
+  14:   stp     x19, x20, [sp, #-16]!     2c:   sub     x27, x25, #0x0
+  18:   stp     x21, x22, [sp, #-16]!     30:   sub     sp, sp, #0x0
+  1c:   stp     x25, x26, [sp, #-16]!     34:   ldr     x0, [x0]
+  20:   stp     x27, x28, [sp, #-16]!   /-------------------------------------
+  24:   mov     x25, sp                /  38:   add     x9, x0, #0x0
+  28:   mov     x26, #0x0             /   3c:   add     x9, x9, #0x0
+  2c:   sub     x27, x25, #0x0       /    40:   lsr     x9, x9, #32
+  30:   sub     sp, sp, #0x0        /     44:   sub     x9, x9, #0x10, lsl #12
+  34:   ldr     x0, [x0]           /      48:   cmp     x9, #0x0
+-----------------------------------       4c:   b.le    0x0000000000000058
+  38:   ldr     x0, [x0]  ------------->  50:   ldr     x0, [x0]
+-----------------------------------\      54:   b       0x000000000000005c
+  3c:   mov     x7, #0x0            \     58:   mov     x0, #0x0
+  40:   mov     sp, sp               \----------------------------------------
+  44:   ldp     x27, x28, [sp], #16       5c:   mov     x7, #0x0
+  48:   ldp     x25, x26, [sp], #16       60:   mov     sp, sp
+  4c:   ldp     x21, x22, [sp], #16       64:   ldp     x27, x28, [sp], #16
+  50:   ldp     x19, x20, [sp], #16       68:   ldp     x25, x26, [sp], #16
+  54:   ldp     x29, x30, [sp], #16       6c:   ldp     x21, x22, [sp], #16
+  58:   add     x0, x7, #0x0              70:   ldp     x19, x20, [sp], #16
+  5c:   autiasp                           74:   ldp     x29, x30, [sp], #16
+  60:   ret                               78:   add     x0, x7, #0x0
+  64:   nop                               7c:   autiasp
+  68:   ldr     x10, 0x0000000000000070   80:   ret
+  6c:   br      x10                       84:   nop
+                                          88:   ldr     x10, 0x0000000000000090
+                                          8c:   br      x10
+
+There are 8 extra instructions added in ARM64.
+
+
+
+                           RISC-V JIT
+                           ==========
+
+
+        No Intrumentation           Verifier's Instrumentation
+           (upstream)                      (This patch)
+        -----------------           --------------------------
+
+                                      0:   nop
+                                      4:   nop
+                                      8:   li      a6, 33
+                                      c:   addi    sp, sp, -16
+                                     10:   sd      s0, 8(sp)
+                                     14:   addi    s0, sp, 16
+                                     18:   ld      a0, 0(a0)
+   0:   nop                      /-----------------------------
+   4:   nop                     /    1c:   mv      t0, a0
+   8:   li      a6, 33         /     20:   mv      t0, t0
+   c:   addi    sp, sp, -16   /      24:   srli    t0, t0, 32
+  10:   sd      s0, 8(sp)    /       28:   lui     t1, 4096
+  14:   addi    s0, sp, 16  /        2c:   sext.w  t1, t1
+  18:   ld      a0, 0(a0)  /         30:   sub     t0, t0, t1
+--------------------------/          34:   bltz    t0, 12
+  1c:   ld      a0, 0(a0)  ------->  38:   ld      a0, 0(a0)
+--------------------------\          3c:   j       8
+  20:   li      a5, 0      \         40:   li      a0, 0
+  24:   ld      s0, 8(sp)   \-----------------------------------
+  28:   addi    sp, sp, 16           44:   li      a5, 0
+  2c:   sext.w  a0, a5               48:   ld      s0, 8(sp)
+  30:   ret                          4c:   addi    sp, sp, 16
+                                     50:   sext.w  a0, a5
+                                     54:   ret
+
+
+There are 9 extra instructions emitted in RISC-V but this experiment was
+done with RISCV_ISA_C disabled, so the number of emitted instructions could
+be less when this option is enabled.
+
+Puranjay Mohan (1):
+  bpf: verifier: prevent userspace memory access
+
+ arch/arm64/net/bpf_jit_comp.c   |  5 +++
+ arch/riscv/net/bpf_jit_comp64.c |  5 +++
+ arch/x86/net/bpf_jit_comp.c     | 72 ++++-----------------------------
+ include/linux/filter.h          |  1 +
+ kernel/bpf/core.c               |  5 +++
+ kernel/bpf/verifier.c           | 33 +++++++++++++++
+ 6 files changed, 57 insertions(+), 64 deletions(-)
+
+-- 
+2.40.1
+
