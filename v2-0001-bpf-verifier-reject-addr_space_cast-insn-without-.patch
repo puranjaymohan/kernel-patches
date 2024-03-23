@@ -1,0 +1,80 @@
+From 6aa842dc1990fe5a74656230f979b1784dc2587f Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+To: Alexei Starovoitov <ast@kernel.org>,Daniel Borkmann <daniel@iogearbox.net>,John Fastabend <john.fastabend@gmail.com>,Andrii Nakryiko <andrii@kernel.org>,Martin KaFai Lau <martin.lau@linux.dev>,Eduard Zingerman <eddyz87@gmail.com>,Song Liu <song@kernel.org>,Yonghong Song <yonghong.song@linux.dev>,KP Singh <kpsingh@kernel.org>,Stanislav Fomichev <sdf@google.com>,Hao Luo <haoluo@google.com>,Jiri Olsa <jolsa@kernel.org>,Paul Walmsley <paul.walmsley@sifive.com>,Palmer Dabbelt <palmer@dabbelt.com>,Albert Ou <aou@eecs.berkeley.edu>,bpf@vger.kernel.org,linux-kernel@vger.kernel.org,linux-riscv@lists.infradead.org, Kumar Kartikeya Dwivedi <memxor@gmail.com>
+Date: Fri, 22 Mar 2024 14:21:46 +0000
+Subject: [PATCH bpf v2] bpf: verifier: reject addr_space_cast insn without
+ arena
+
+The verifier allows using the addr_space_cast instruction in a program
+that doesn't have an associated arena. This was caught in the form an
+invalid memory access in do_misc_fixups() when while converting
+addr_space_cast to a normal 32-bit mov, env->prog->aux->arena was
+dereferenced to check for BPF_F_NO_USER_CONV flag.
+
+Reject programs that include the addr_space_cast instruction but don't
+have an associated arena.
+
+root@rv-tester:~# ./reproducer
+ Unable to handle kernel access to user memory without uaccess routines at virtual address 0000000000000030
+ Oops [#1]
+ Modules linked in: sch_fq_codel drm fuse i2c_core drm_panel_orientation_quirks backlight configfs ip_tables x_tables
+ CPU: 2 PID: 265 Comm: reproducer Not tainted 6.8.0 #3
+ Hardware name: riscv-virtio,qemu (DT)
+ epc : do_misc_fixups+0x43c/0x1168
+  ra : bpf_check+0xda8/0x22b6
+ epc : ffffffff8017eeaa ra : ffffffff801936d6 sp : ff200000011bb890
+  gp : ffffffff82293468 tp : ff60000084fcb840 t0 : ff60000084e38048
+  t1 : 0000000000000048 t2 : ff5fffff80000000 s0 : ff200000011bba60
+  s1 : ff2000000101d058 a0 : ff6000008b980000 a1 : 0000000000000004
+  a2 : 00000000000000e1 a3 : 0000000000000001 a4 : 0000000000010000
+  a5 : 0000000000000000 a6 : 0000000000000001 a7 : ff2000000101d000
+  s2 : 0000000000000002 s3 : 0000000000000000 s4 : 0000000000000000
+  s5 : 0000000000000002 s6 : 0000000000000000 s7 : ff6000008b980aa0
+  s8 : 0000000000010005 s9 : 0000000000000004 s10: ff6000008b980000
+  s11: 0000000000000000 t3 : 0000000000002000 t4 : 0000ff0000000000
+  t5 : 00ff000000000000 t6 : ff20000000000000
+ status: 0000000200000120 badaddr: 0000000000000030 cause: 000000000000000d
+ [<ffffffff8017eeaa>] do_misc_fixups+0x43c/0x1168
+ [<ffffffff801936d6>] bpf_check+0xda8/0x22b6
+ [<ffffffff80174b32>] bpf_prog_load+0x486/0x8dc
+ [<ffffffff80176566>] __sys_bpf+0xbd8/0x214e
+ [<ffffffff80177d14>] __riscv_sys_bpf+0x22/0x2a
+ [<ffffffff80d2493a>] do_trap_ecall_u+0x102/0x17c
+ [<ffffffff80d3048c>] ret_from_exception+0x0/0x64
+ Code: b345 9783 0024 4685 8b63 16d7 3783 008d 7f9c 7fdc (5b9c) 83c9
+ ---[ end trace 0000000000000000 ]---
+ Kernel panic - not syncing: Fatal exception
+ SMP: stopping secondary CPUs
+
+Fixes: 6082b6c328b5 ("bpf: Recognize addr_space_cast instruction in the verifier.")
+Reported-by: xingwei lee <xrivendell7@gmail.com>
+Reported-by: yue sun <samsun1006219@gmail.com>
+Closes: https://lore.kernel.org/bpf/CABOYnLz09O1+2gGVJuCxd_24a-7UueXzV-Ff+Fr+h5EKFDiYCQ@mail.gmail.com/
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+Changes in V2:
+V1: https://lore.kernel.org/bpf/20240322143829.40808-1-puranjay12@gmail.com/
+- Reject programs that have the addr_space_cast instruction without an
+  arena rather than checking for a NULL pointer in do_misc_fixups.
+---
+ kernel/bpf/verifier.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/kernel/bpf/verifier.c b/kernel/bpf/verifier.c
+index ca6cacf7b42f..7d0bbee10d71 100644
+--- a/kernel/bpf/verifier.c
++++ b/kernel/bpf/verifier.c
+@@ -14014,6 +14014,10 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
+ 					verbose(env, "addr_space_cast insn can only convert between address space 1 and 0\n");
+ 					return -EINVAL;
+ 				}
++				if (!env->prog->aux->arena) {
++					verbose(env, "addr_space_cast insn can only be used in a program that has an associated arena\n");
++					return -EINVAL;
++				}
+ 			} else {
+ 				if ((insn->off != 0 && insn->off != 8 && insn->off != 16 &&
+ 				     insn->off != 32) || insn->imm) {
+-- 
+2.40.1
+

@@ -1,0 +1,38 @@
+From f7c54be70addc9b0fb3817da557de6b4d4b5d724 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+To: Andrii Nakryiko <andrii@kernel.org>,Eduard Zingerman <eddyz87@gmail.com>,Mykola Lysenko <mykolal@fb.com>,Alexei Starovoitov <ast@kernel.org>,Daniel Borkmann <daniel@iogearbox.net>,Martin KaFai Lau <martin.lau@linux.dev>,Song Liu <song@kernel.org>,Yonghong Song <yonghong.song@linux.dev>,John Fastabend <john.fastabend@gmail.com>,KP Singh <kpsingh@kernel.org>,Stanislav Fomichev <sdf@google.com>,Hao Luo <haoluo@google.com>,Jiri Olsa <jolsa@kernel.org>,Shuah Khan <shuah@kernel.org>,Puranjay Mohan <puranjay12@gmail.com>,bpf@vger.kernel.org,linux-kselftest@vger.kernel.org,linux-kernel@vger.kernel.org
+Date: Fri, 22 Mar 2024 13:14:33 +0000
+Subject: [PATCH bpf] selftests/bpf: verifier_arena: fix mmap address for arm64
+
+The arena_list selftest uses (1ull << 32) in the mmap address
+computation for arm64. Use the same in the verifier_arena selftest.
+
+This makes the selftest pass for arm64 on the CI[1].
+
+[1] https://github.com/kernel-patches/bpf/pull/6622
+
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+ tools/testing/selftests/bpf/progs/verifier_arena.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/tools/testing/selftests/bpf/progs/verifier_arena.c b/tools/testing/selftests/bpf/progs/verifier_arena.c
+index 5540b05ff9ee..91818a84e86d 100644
+--- a/tools/testing/selftests/bpf/progs/verifier_arena.c
++++ b/tools/testing/selftests/bpf/progs/verifier_arena.c
+@@ -12,7 +12,11 @@ struct {
+ 	__uint(type, BPF_MAP_TYPE_ARENA);
+ 	__uint(map_flags, BPF_F_MMAPABLE);
+ 	__uint(max_entries, 2); /* arena of two pages close to 32-bit boundary*/
+-	__ulong(map_extra, (1ull << 44) | (~0u - __PAGE_SIZE * 2 + 1)); /* start of mmap() region */
++#ifdef __TARGET_ARCH_arm64
++        __ulong(map_extra, (1ull << 32) | (~0u - __PAGE_SIZE * 2 + 1)); /* start of mmap() region */
++#else
++        __ulong(map_extra, (1ull << 44) | (~0u - __PAGE_SIZE * 2 + 1)); /* start of mmap() region */
++#endif
+ } arena SEC(".maps");
+ 
+ SEC("syscall")
+-- 
+2.40.1
+
