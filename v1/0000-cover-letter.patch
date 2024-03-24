@@ -1,0 +1,45 @@
+From 0889dbf108bc21abae700e89e030676fbd463204 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+To: Alexei Starovoitov <ast@kernel.org>,Daniel Borkmann <daniel@iogearbox.net>,Andrii Nakryiko <andrii@kernel.org>,Martin KaFai Lau <martin.lau@linux.dev>,Eduard Zingerman <eddyz87@gmail.com>,Song Liu <song@kernel.org>,Yonghong Song <yonghong.song@linux.dev>,John Fastabend <john.fastabend@gmail.com>,KP Singh <kpsingh@kernel.org>,Stanislav Fomichev <sdf@google.com>,Hao Luo <haoluo@google.com>,Jiri Olsa <jolsa@kernel.org>,"Björn Töpel" <bjorn@kernel.org>,Luke Nelson <luke.r.nels@gmail.com>,Xi Wang <xi.wang@gmail.com>,Paul Walmsley <paul.walmsley@sifive.com>,Palmer Dabbelt <palmer@dabbelt.com>,Albert Ou <aou@eecs.berkeley.edu>,bpf@vger.kernel.org,linux-riscv@lists.infradead.org,linux-kernel@vger.kernel.org
+Date: Sat, 23 Mar 2024 12:30:03 +0000
+Subject: [PATCH bpf-next 0/2] bpf,riscv: Add support for BPF Arena
+
+This series adds the support for PROBE_MEM32 and bpf_addr_space_cast
+instructions to the RISCV BPF JIT. These two instructions allow the
+enablement of BPF Arena.
+
+All arena related selftests are passing:
+
+  root@rv-tester:~/bpf# uname -p
+  riscv64
+  root@rv-tester:~/bpf# ./test_progs -a "*arena*"
+  #3/1     arena_htab/arena_htab_llvm:OK
+  #3/2     arena_htab/arena_htab_asm:OK
+  #3       arena_htab:OK
+  #4/1     arena_list/arena_list_1:OK
+  #4/2     arena_list/arena_list_1000:OK
+  #4       arena_list:OK
+  #434/1   verifier_arena/basic_alloc1:OK
+  #434/2   verifier_arena/basic_alloc2:OK
+  #434/3   verifier_arena/basic_alloc3:OK
+  #434/4   verifier_arena/iter_maps1:OK
+  #434/5   verifier_arena/iter_maps2:OK
+  #434/6   verifier_arena/iter_maps3:OK
+  #434     verifier_arena:OK
+  Summary: 3/10 PASSED, 0 SKIPPED, 0 FAILED
+
+This needs the following commit in bpf/bpf.git to work correctly:
+https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf.git/commit/?id=f7f5d1808b1b66935a24dd796dd1a0612ca9c147
+
+Puranjay Mohan (2):
+  bpf,riscv: Implement PROBE_MEM32 pseudo instructions
+  bpf,riscv: Implement bpf_addr_space_cast instruction
+
+ arch/riscv/net/bpf_jit.h        |   2 +
+ arch/riscv/net/bpf_jit_comp64.c | 208 +++++++++++++++++++++++++++++++-
+ arch/riscv/net/bpf_jit_core.c   |   3 +
+ 3 files changed, 210 insertions(+), 3 deletions(-)
+
+-- 
+2.40.1
+

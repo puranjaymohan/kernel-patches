@@ -1,0 +1,354 @@
+From f6ab194f5acbdf10d8f05f1a45d324e7c46238a9 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+Date: Sun, 17 Mar 2024 16:54:45 +0000
+Subject: [PATCH bpf-next 1/2] bpf,riscv: Implement PROBE_MEM32 pseudo
+ instructions
+
+Add support for [LDX | STX | ST], PROBE_MEM32, [B | H | W | DW]
+instructions.  They are similar to PROBE_MEM instructions with the
+following differences:
+- PROBE_MEM32 supports store.
+- PROBE_MEM32 relies on the verifier to clear upper 32-bit of the
+  src/dst register
+- PROBE_MEM32 adds 64-bit kern_vm_start address (which is stored in S11
+  in the prologue). Due to bpf_arena constructions such S11 + reg +
+  off16 access is guaranteed to be within arena virtual range, so no
+  address check at run-time.
+- S11 is a free callee-saved register, so it is used to store kern_vm_start
+- PROBE_MEM32 allows STX and ST. If they fault the store is a nop. When
+  LDX faults the destination register is zeroed.
+
+To support these on riscv, we do tmp = S11 + src/dst reg and then use
+tmp2 as the new src/dst register. This allows us to reuse most of the
+code for normal [LDX | STX | ST].
+
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+ arch/riscv/net/bpf_jit.h        |   1 +
+ arch/riscv/net/bpf_jit_comp64.c | 193 +++++++++++++++++++++++++++++++-
+ arch/riscv/net/bpf_jit_core.c   |   2 +
+ 3 files changed, 193 insertions(+), 3 deletions(-)
+
+diff --git a/arch/riscv/net/bpf_jit.h b/arch/riscv/net/bpf_jit.h
+index f4b6b3b9edda..8a47da08dd9c 100644
+--- a/arch/riscv/net/bpf_jit.h
++++ b/arch/riscv/net/bpf_jit.h
+@@ -81,6 +81,7 @@ struct rv_jit_context {
+ 	int nexentries;
+ 	unsigned long flags;
+ 	int stack_size;
++	u64 arena_vm_start;
+ };
+ 
+ /* Convert from ninsns to bytes. */
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index aac190085472..f51b832eafb6 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -255,6 +255,10 @@ static void __build_epilogue(bool is_tail_call, struct rv_jit_context *ctx)
+ 		emit_ld(RV_REG_S6, store_offset, RV_REG_SP, ctx);
+ 		store_offset -= 8;
+ 	}
++	if (ctx->arena_vm_start) {
++		emit_ld(RV_REG_S11, store_offset, RV_REG_SP, ctx);
++		store_offset -= 8;
++	}
+ 
+ 	emit_addi(RV_REG_SP, RV_REG_SP, stack_adjust, ctx);
+ 	/* Set return value. */
+@@ -548,6 +552,7 @@ static void emit_atomic(u8 rd, u8 rs, s16 off, s32 imm, bool is64,
+ 
+ #define BPF_FIXUP_OFFSET_MASK   GENMASK(26, 0)
+ #define BPF_FIXUP_REG_MASK      GENMASK(31, 27)
++#define DONT_CLEAR		16	/* RV_REG_A6 unused in BPF */
+ 
+ bool ex_handler_bpf(const struct exception_table_entry *ex,
+ 		    struct pt_regs *regs)
+@@ -555,7 +560,8 @@ bool ex_handler_bpf(const struct exception_table_entry *ex,
+ 	off_t offset = FIELD_GET(BPF_FIXUP_OFFSET_MASK, ex->fixup);
+ 	int regs_offset = FIELD_GET(BPF_FIXUP_REG_MASK, ex->fixup);
+ 
+-	*(unsigned long *)((void *)regs + pt_regmap[regs_offset]) = 0;
++	if (regs_offset != DONT_CLEAR)
++		*(unsigned long *)((void *)regs + pt_regmap[regs_offset]) = 0;
+ 	regs->epc = (unsigned long)&ex->fixup - offset;
+ 
+ 	return true;
+@@ -572,7 +578,8 @@ static int add_exception_handler(const struct bpf_insn *insn,
+ 	off_t fixup_offset;
+ 
+ 	if (!ctx->insns || !ctx->ro_insns || !ctx->prog->aux->extable ||
+-	    (BPF_MODE(insn->code) != BPF_PROBE_MEM && BPF_MODE(insn->code) != BPF_PROBE_MEMSX))
++	    (BPF_MODE(insn->code) != BPF_PROBE_MEM && BPF_MODE(insn->code) != BPF_PROBE_MEMSX &&
++	     BPF_MODE(insn->code) != BPF_PROBE_MEM32))
+ 		return 0;
+ 
+ 	if (WARN_ON_ONCE(ctx->nexentries >= ctx->prog->aux->num_exentries))
+@@ -622,6 +629,9 @@ static int add_exception_handler(const struct bpf_insn *insn,
+ 
+ 	ex->insn = ins_offset;
+ 
++	if (BPF_CLASS(insn->code) != BPF_LDX)
++		dst_reg = DONT_CLEAR;
++
+ 	ex->fixup = FIELD_PREP(BPF_FIXUP_OFFSET_MASK, fixup_offset) |
+ 		FIELD_PREP(BPF_FIXUP_REG_MASK, dst_reg);
+ 	ex->type = EX_TYPE_BPF;
+@@ -1063,7 +1073,7 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 		    BPF_CLASS(insn->code) == BPF_JMP;
+ 	int s, e, rvoff, ret, i = insn - ctx->prog->insnsi;
+ 	struct bpf_prog_aux *aux = ctx->prog->aux;
+-	u8 rd = -1, rs = -1, code = insn->code;
++	u8 rd = -1, rs = -1, code = insn->code, reg_arena_vm_start = RV_REG_S11;
+ 	s16 off = insn->off;
+ 	s32 imm = insn->imm;
+ 
+@@ -1523,6 +1533,11 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 	case BPF_LDX | BPF_PROBE_MEMSX | BPF_B:
+ 	case BPF_LDX | BPF_PROBE_MEMSX | BPF_H:
+ 	case BPF_LDX | BPF_PROBE_MEMSX | BPF_W:
++	/* LDX | PROBE_MEM32: dst = *(unsigned size *)(src + S11 + off)*/
++	case BPF_LDX | BPF_PROBE_MEM32 | BPF_B:
++	case BPF_LDX | BPF_PROBE_MEM32 | BPF_H:
++	case BPF_LDX | BPF_PROBE_MEM32 | BPF_W:
++	case BPF_LDX | BPF_PROBE_MEM32 | BPF_DW:
+ 	{
+ 		int insn_len, insns_start;
+ 		bool sign_ext;
+@@ -1530,6 +1545,11 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 		sign_ext = BPF_MODE(insn->code) == BPF_MEMSX ||
+ 			   BPF_MODE(insn->code) == BPF_PROBE_MEMSX;
+ 
++		if (BPF_MODE(insn->code) == BPF_PROBE_MEM32) {
++			emit_add(RV_REG_T2, rs, reg_arena_vm_start, ctx);
++			rs = RV_REG_T2;
++		}
++
+ 		switch (BPF_SIZE(code)) {
+ 		case BPF_B:
+ 			if (is_12b_int(off)) {
+@@ -1666,6 +1686,87 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 		emit_sd(RV_REG_T2, 0, RV_REG_T1, ctx);
+ 		break;
+ 
++	case BPF_ST | BPF_PROBE_MEM32 | BPF_B:
++	case BPF_ST | BPF_PROBE_MEM32 | BPF_H:
++	case BPF_ST | BPF_PROBE_MEM32 | BPF_W:
++	case BPF_ST | BPF_PROBE_MEM32 | BPF_DW:
++	{
++		int insn_len, insns_start;
++
++		emit_add(RV_REG_T3, rd, reg_arena_vm_start, ctx);
++		rd = RV_REG_T3;
++
++		/* Load imm to a register then store it */
++		emit_imm(RV_REG_T1, imm, ctx);
++
++		switch (BPF_SIZE(code)) {
++		case BPF_B:
++			if (is_12b_int(off)) {
++				insns_start = ctx->ninsns;
++				emit(rv_sb(rd, off, RV_REG_T1), ctx);
++				insn_len = ctx->ninsns - insns_start;
++				break;
++			}
++
++			emit_imm(RV_REG_T2, off, ctx);
++			emit_add(RV_REG_T2, RV_REG_T2, rd, ctx);
++			insns_start = ctx->ninsns;
++			emit(rv_sb(RV_REG_T2, 0, RV_REG_T1), ctx);
++			insn_len = ctx->ninsns - insns_start;
++
++			break;
++
++		case BPF_H:
++			if (is_12b_int(off)) {
++				insns_start = ctx->ninsns;
++				emit(rv_sh(rd, off, RV_REG_T1), ctx);
++				insn_len = ctx->ninsns - insns_start;
++				break;
++			}
++
++			emit_imm(RV_REG_T2, off, ctx);
++			emit_add(RV_REG_T2, RV_REG_T2, rd, ctx);
++			insns_start = ctx->ninsns;
++			emit(rv_sh(RV_REG_T2, 0, RV_REG_T1), ctx);
++			insn_len = ctx->ninsns - insns_start;
++			break;
++		case BPF_W:
++			if (is_12b_int(off)) {
++				insns_start = ctx->ninsns;
++				emit_sw(rd, off, RV_REG_T1, ctx);
++				insn_len = ctx->ninsns - insns_start;
++				break;
++			}
++
++			emit_imm(RV_REG_T2, off, ctx);
++			emit_add(RV_REG_T2, RV_REG_T2, rd, ctx);
++			insns_start = ctx->ninsns;
++			emit_sw(RV_REG_T2, 0, RV_REG_T1, ctx);
++			insn_len = ctx->ninsns - insns_start;
++			break;
++		case BPF_DW:
++			if (is_12b_int(off)) {
++				insns_start = ctx->ninsns;
++				emit_sd(rd, off, RV_REG_T1, ctx);
++				insn_len = ctx->ninsns - insns_start;
++				break;
++			}
++
++			emit_imm(RV_REG_T2, off, ctx);
++			emit_add(RV_REG_T2, RV_REG_T2, rd, ctx);
++			insns_start = ctx->ninsns;
++			emit_sd(RV_REG_T2, 0, RV_REG_T1, ctx);
++			insn_len = ctx->ninsns - insns_start;
++			break;
++		}
++
++		ret = add_exception_handler(insn, ctx, rd, insn_len);
++		if (ret)
++			return ret;
++
++		break;
++	}
++
+ 	/* STX: *(size *)(dst + off) = src */
+ 	case BPF_STX | BPF_MEM | BPF_B:
+ 		if (is_12b_int(off)) {
+@@ -1712,6 +1813,83 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 		emit_atomic(rd, rs, off, imm,
+ 			    BPF_SIZE(code) == BPF_DW, ctx);
+ 		break;
++
++	case BPF_STX | BPF_PROBE_MEM32 | BPF_B:
++	case BPF_STX | BPF_PROBE_MEM32 | BPF_H:
++	case BPF_STX | BPF_PROBE_MEM32 | BPF_W:
++	case BPF_STX | BPF_PROBE_MEM32 | BPF_DW:
++	{
++		int insn_len, insns_start;
++
++		emit_add(RV_REG_T2, rd, reg_arena_vm_start, ctx);
++		rd = RV_REG_T2;
++
++		switch (BPF_SIZE(code)) {
++		case BPF_B:
++			if (is_12b_int(off)) {
++				insns_start = ctx->ninsns;
++				emit(rv_sb(rd, off, rs), ctx);
++				insn_len = ctx->ninsns - insns_start;
++				break;
++			}
++
++			emit_imm(RV_REG_T1, off, ctx);
++			emit_add(RV_REG_T1, RV_REG_T1, rd, ctx);
++			insns_start = ctx->ninsns;
++			emit(rv_sb(RV_REG_T1, 0, rs), ctx);
++			insn_len = ctx->ninsns - insns_start;
++			break;
++		case BPF_H:
++			if (is_12b_int(off)) {
++				insns_start = ctx->ninsns;
++				emit(rv_sh(rd, off, rs), ctx);
++				insn_len = ctx->ninsns - insns_start;
++				break;
++			}
++
++			emit_imm(RV_REG_T1, off, ctx);
++			emit_add(RV_REG_T1, RV_REG_T1, rd, ctx);
++			insns_start = ctx->ninsns;
++			emit(rv_sh(RV_REG_T1, 0, rs), ctx);
++			insn_len = ctx->ninsns - insns_start;
++			break;
++		case BPF_W:
++			if (is_12b_int(off)) {
++				insns_start = ctx->ninsns;
++				emit_sw(rd, off, rs, ctx);
++				insn_len = ctx->ninsns - insns_start;
++				break;
++			}
++
++			emit_imm(RV_REG_T1, off, ctx);
++			emit_add(RV_REG_T1, RV_REG_T1, rd, ctx);
++			insns_start = ctx->ninsns;
++			emit_sw(RV_REG_T1, 0, rs, ctx);
++			insn_len = ctx->ninsns - insns_start;
++			break;
++		case BPF_DW:
++			if (is_12b_int(off)) {
++				insns_start = ctx->ninsns;
++				emit_sd(rd, off, rs, ctx);
++				insn_len = ctx->ninsns - insns_start;
++				break;
++			}
++
++			emit_imm(RV_REG_T1, off, ctx);
++			emit_add(RV_REG_T1, RV_REG_T1, rd, ctx);
++			insns_start = ctx->ninsns;
++			emit_sd(RV_REG_T1, 0, rs, ctx);
++			insn_len = ctx->ninsns - insns_start;
++			break;
++		}
++
++		ret = add_exception_handler(insn, ctx, rd, insn_len);
++		if (ret)
++			return ret;
++
++		break;
++	}
++
+ 	default:
+ 		pr_err("bpf-jit: unknown opcode %02x\n", code);
+ 		return -EINVAL;
+@@ -1743,6 +1921,8 @@ void bpf_jit_build_prologue(struct rv_jit_context *ctx, bool is_subprog)
+ 		stack_adjust += 8;
+ 	if (seen_reg(RV_REG_S6, ctx))
+ 		stack_adjust += 8;
++	if (ctx->arena_vm_start)
++		stack_adjust += 8;
+ 
+ 	stack_adjust = round_up(stack_adjust, 16);
+ 	stack_adjust += bpf_stack_adjust;
+@@ -1794,6 +1974,10 @@ void bpf_jit_build_prologue(struct rv_jit_context *ctx, bool is_subprog)
+ 		emit_sd(RV_REG_SP, store_offset, RV_REG_S6, ctx);
+ 		store_offset -= 8;
+ 	}
++	if (ctx->arena_vm_start) {
++		emit_sd(RV_REG_SP, store_offset, RV_REG_S11, ctx);
++		store_offset -= 8;
++	}
+ 
+ 	emit_addi(RV_REG_FP, RV_REG_SP, stack_adjust, ctx);
+ 
+@@ -1807,6 +1991,9 @@ void bpf_jit_build_prologue(struct rv_jit_context *ctx, bool is_subprog)
+ 		emit_mv(RV_REG_TCC_SAVED, RV_REG_TCC, ctx);
+ 
+ 	ctx->stack_size = stack_adjust;
++
++	if (ctx->arena_vm_start)
++		emit_imm(RV_REG_S11, ctx->arena_vm_start, ctx);
+ }
+ 
+ void bpf_jit_build_epilogue(struct rv_jit_context *ctx)
+diff --git a/arch/riscv/net/bpf_jit_core.c b/arch/riscv/net/bpf_jit_core.c
+index 6b3acac30c06..9b6696b1290a 100644
+--- a/arch/riscv/net/bpf_jit_core.c
++++ b/arch/riscv/net/bpf_jit_core.c
+@@ -50,6 +50,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
+ 	int pass = 0, prev_ninsns = 0, i;
+ 	struct rv_jit_data *jit_data;
+ 	struct rv_jit_context *ctx;
++	u64 arena_vm_start;
+ 
+ 	if (!prog->jit_requested)
+ 		return orig_prog;
+@@ -80,6 +81,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
+ 		goto skip_init_ctx;
+ 	}
+ 
++	ctx->arena_vm_start = bpf_arena_get_kern_vm_start(prog->aux->arena);
+ 	ctx->prog = prog;
+ 	ctx->offset = kcalloc(prog->len, sizeof(int), GFP_KERNEL);
+ 	if (!ctx->offset) {
+-- 
+2.40.1
+
