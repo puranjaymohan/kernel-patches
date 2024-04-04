@@ -1,0 +1,41 @@
+From b13c7a904fb063931855859fbaadbf8cf6af7486 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+To: Paul Walmsley <paul.walmsley@sifive.com>,Palmer Dabbelt <palmer@dabbelt.com>,Albert Ou <aou@eecs.berkeley.edu>,linux-riscv@lists.infradead.org,linux-kernel@vger.kernel.org, "Björn Töpel <bjorn@rivosinc.com>"
+Date: Thu, 28 Mar 2024 17:53:47 +0000
+Subject: [PATCH 0/2] riscv: ftrace: make stack walk more robust.
+
+The current stack walker in riscv implemented in walk_stackframe() provides
+the PC to a callback function when it unwinds the stacks. This doesn't
+allow implementing stack walkers that need access to more information like
+the frame pointer, etc.
+
+This series makes walk_stackframe() provide a unwinde_state structure to
+callback functions. This structure has all the information that
+walk_stackframe() can provide.
+
+Currently, there are four users of walk_stackframe(): return_address(),
+perf_callchain_kernel(), dump_backtrace(), and __get_wchan(). All of these
+have been converted to use arch_stack_walk() rather than calling
+walk_stackframe() directly.
+
+We need this to implement arch_bpf_stack_walk() that provides a callback
+that needs the FP, SP, and PC. This will be needed for implementing BFP
+exceptions for RISCV.
+
+There are no functional changes in this series.
+
+I have tested this by crashing the kernel and looking at the stack trace
+with and without CONFIG_FRAME_POINTER
+
+Puranjay Mohan (2):
+  riscv: stacktrace: use arch_stack_walk() in place of walk_stackframe
+  riscv: stacktrace: make walk_stackframe() more robust
+
+ arch/riscv/include/asm/stacktrace.h |  2 -
+ arch/riscv/kernel/perf_callchain.c  |  2 +-
+ arch/riscv/kernel/stacktrace.c      | 75 +++++++++++++++++++++++------
+ 3 files changed, 61 insertions(+), 18 deletions(-)
+
+-- 
+2.40.1
+

@@ -1,0 +1,149 @@
+From b13c7a904fb063931855859fbaadbf8cf6af7486 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+Date: Thu, 28 Mar 2024 15:34:14 +0000
+Subject: [PATCH 2/2] riscv: stacktrace: make walk_stackframe() more robust
+
+Currently walk_stackframe() provides only a cookie and the PC to the
+consume_entry function. This doesn't allow the implementation of
+advanced stack walkers that need access to SP and FP as well.
+
+Change walk_stackframe to provide a struct unwind_state to the
+consume_entry function. This unwind_state has all information that is
+available to walk_stackframe. The information provided to the callback
+will not always be live/useful, the callback would be aware of the
+different configurations the information in unwind_state can be.
+
+For example: if CONFIG_FRAME_POINTER is not available, unwind_state->fp
+will always be zero.
+
+This commit doesn't make any functional changes.
+
+Signed-off-by: Puranjay Mohan <puranjay12@gmail.com>
+---
+ arch/riscv/kernel/stacktrace.c | 55 ++++++++++++++++++++++++++++++----
+ 1 file changed, 49 insertions(+), 6 deletions(-)
+
+diff --git a/arch/riscv/kernel/stacktrace.c b/arch/riscv/kernel/stacktrace.c
+index e28f7b2e4b6a6..92c41c87b267b 100644
+--- a/arch/riscv/kernel/stacktrace.c
++++ b/arch/riscv/kernel/stacktrace.c
+@@ -14,15 +14,26 @@
+ 
+ #include <asm/stacktrace.h>
+ 
++struct unwind_state {
++	unsigned long fp;
++	unsigned long sp;
++	unsigned long pc;
++	struct pt_regs *regs;
++	struct task_struct *task;
++};
++
++typedef bool (*unwind_consume_fn)(void *cookie, const struct unwind_state *state);
++
+ #ifdef CONFIG_FRAME_POINTER
+ 
+ extern asmlinkage void ret_from_exception(void);
+ 
+ static __always_inline void
+ walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+-		bool (*fn)(void *, unsigned long), void *arg)
++		unwind_consume_fn fn, void *arg)
+ {
+ 	unsigned long fp, sp, pc;
++	struct unwind_state state;
+ 	int level = 0;
+ 
+ 	if (regs) {
+@@ -40,12 +51,17 @@ walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+ 		sp = task->thread.sp;
+ 		pc = task->thread.ra;
+ 	}
++	state.task = task;
++	state.regs = regs;
+ 
+ 	for (;;) {
+ 		unsigned long low, high;
+ 		struct stackframe *frame;
+ 
+-		if (unlikely(!__kernel_text_address(pc) || (level++ >= 0 && !fn(arg, pc))))
++		state.sp = sp;
++		state.fp = fp;
++		state.pc = pc;
++		if (unlikely(!__kernel_text_address(pc) || (level++ >= 0 && !fn(arg, &state))))
+ 			break;
+ 
+ 		/* Validate frame pointer */
+@@ -64,7 +80,10 @@ walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+ 			pc = ftrace_graph_ret_addr(current, NULL, frame->ra,
+ 						   &frame->ra);
+ 			if (pc == (unsigned long)ret_from_exception) {
+-				if (unlikely(!__kernel_text_address(pc) || !fn(arg, pc)))
++				state.sp = sp;
++				state.fp = fp;
++				state.pc = pc;
++				if (unlikely(!__kernel_text_address(pc) || !fn(arg, &state)))
+ 					break;
+ 
+ 				pc = ((struct pt_regs *)sp)->epc;
+@@ -79,9 +98,10 @@ walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+ 
+ static __always_inline void
+ walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+-		bool (*fn)(void *, unsigned long), void *arg)
++		unwind_consume_fn fn, void *arg)
+ {
+ 	unsigned long sp, pc;
++	struct unwind_state state;
+ 	unsigned long *ksp;
+ 
+ 	if (regs) {
+@@ -99,9 +119,14 @@ walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+ 	if (unlikely(sp & 0x7))
+ 		return;
+ 
++	state.task = task;
++	state.regs = regs;
++	state.sp = sp;
++	state.fp = 0;
+ 	ksp = (unsigned long *)sp;
+ 	while (!kstack_end(ksp)) {
+-		if (__kernel_text_address(pc) && unlikely(!fn(arg, pc)))
++		state.pc = pc;
++		if (__kernel_text_address(pc) && unlikely(!fn(arg, &state)))
+ 			break;
+ 		pc = READ_ONCE_NOCHECK(*ksp++) - 0x4;
+ 	}
+@@ -109,10 +134,28 @@ walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+ 
+ #endif /* CONFIG_FRAME_POINTER */
+ 
++struct unwind_consume_entry_data {
++	stack_trace_consume_fn consume_entry;
++	void *cookie;
++};
++
++static __always_inline bool
++arch_unwind_consume_entry(void *cookie, const struct unwind_state *state)
++{
++	struct unwind_consume_entry_data *data = cookie;
++
++	return data->consume_entry(data->cookie, state->pc);
++}
++
+ noinline noinstr void arch_stack_walk(stack_trace_consume_fn consume_entry, void *cookie,
+ 				      struct task_struct *task, struct pt_regs *regs)
+ {
+-	walk_stackframe(task, regs, consume_entry, cookie);
++	struct unwind_consume_entry_data data = {
++		.consume_entry = consume_entry,
++		.cookie = cookie,
++	};
++
++	walk_stackframe(task, regs, arch_unwind_consume_entry, &data);
+ }
+ 
+ static bool print_trace_address(void *arg, unsigned long pc)
+-- 
+2.40.1
+
