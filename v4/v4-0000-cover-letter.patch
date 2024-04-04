@@ -1,0 +1,64 @@
+From a1072c55532171299a93decd9b1d628f07795a12 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay12@gmail.com>
+To: Alexei Starovoitov <ast@kernel.org>,Daniel Borkmann <daniel@iogearbox.net>,Andrii Nakryiko <andrii@kernel.org>,Martin KaFai Lau <martin.lau@linux.dev>,Eduard Zingerman <eddyz87@gmail.com>,Song Liu <song@kernel.org>,Yonghong Song <yonghong.song@linux.dev>,John Fastabend <john.fastabend@gmail.com>,KP Singh <kpsingh@kernel.org>,Stanislav Fomichev <sdf@google.com>,Hao Luo <haoluo@google.com>,Jiri Olsa <jolsa@kernel.org>,"Björn Töpel" <bjorn@kernel.org>,Luke Nelson <luke.r.nels@gmail.com>,Xi Wang <xi.wang@gmail.com>,Paul Walmsley <paul.walmsley@sifive.com>,Palmer Dabbelt <palmer@dabbelt.com>,Albert Ou <aou@eecs.berkeley.edu>,bpf@vger.kernel.org,linux-riscv@lists.infradead.org,linux-kernel@vger.kernel.org, Pu Lehui <pulehui@huaweicloud.com>
+Date: Thu, 4 Apr 2024 11:18:40 +0000
+Subject: [PATCH bpf-next v4 0/2] bpf,riscv: Add support for BPF Arena
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Changes in V4:
+V3: https://lore.kernel.org/all/20240326224943.86912-1-puranjay12@gmail.com/
+- Fix some style issues.
+- Add Tested-by: and Reviewed-by: tags by Pu Lehui and Björn
+
+Changes in V3
+V2: https://lore.kernel.org/bpf/20240325155434.65589-1-puranjay12@gmail.com/
+- Use REG_DONT_CLEAR_MARKER in place of DONT_CLEAR as the name.
+- Use RV_REG_ZERO for the above as it is guaranteed to be never used in as
+  dst/src register in BPF LDX/STX/ST instructions.
+- Use #define RV_REG_ARENA for RV_REG_S7
+
+Changes in V2
+V1: https://lore.kernel.org/bpf/20240323154652.54572-1-puranjay12@gmail.com/
+- Used S7 in place of S11 for storing the kernel_vm_start
+- Used 17 in place of 16 for DONT_CLEAR marker
+- Remove an unused variable
+- Removed some misleading information from the commit message.
+
+This series adds the support for PROBE_MEM32 and bpf_addr_space_cast
+instructions to the RISCV BPF JIT. These two instructions allow the
+enablement of BPF Arena.
+
+All arena related selftests are passing:
+
+  root@rv-tester:~/bpf# uname -p
+  riscv64
+  root@rv-tester:~/bpf# ./test_progs -a "*arena*"
+  #3/1     arena_htab/arena_htab_llvm:OK
+  #3/2     arena_htab/arena_htab_asm:OK
+  #3       arena_htab:OK
+  #4/1     arena_list/arena_list_1:OK
+  #4/2     arena_list/arena_list_1000:OK
+  #4       arena_list:OK
+  #434/1   verifier_arena/basic_alloc1:OK
+  #434/2   verifier_arena/basic_alloc2:OK
+  #434/3   verifier_arena/basic_alloc3:OK
+  #434/4   verifier_arena/iter_maps1:OK
+  #434/5   verifier_arena/iter_maps2:OK
+  #434/6   verifier_arena/iter_maps3:OK
+  #434     verifier_arena:OK
+  Summary: 3/10 PASSED, 0 SKIPPED, 0 FAILED
+
+Puranjay Mohan (2):
+  bpf,riscv: Implement PROBE_MEM32 pseudo instructions
+  bpf,riscv: Implement bpf_addr_space_cast instruction
+
+ arch/riscv/net/bpf_jit.h        |   2 +
+ arch/riscv/net/bpf_jit_comp64.c | 203 +++++++++++++++++++++++++++++++-
+ arch/riscv/net/bpf_jit_core.c   |   2 +
+ 3 files changed, 205 insertions(+), 2 deletions(-)
+
+-- 
+2.40.1
+
