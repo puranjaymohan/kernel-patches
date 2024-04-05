@@ -1,0 +1,9 @@
+Before:
+glob-arr-inc   :   23.597 ± 0.012M/s
+arr-inc        :   23.173 ± 0.019M/s
+hash-inc       :   12.186 ± 0.028M/s
+
+After:
+glob-arr-inc   :   23.819 ± 0.034M/s
+arr-inc        :   23.285 ± 0.017M/s
+hash-inc       :   12.419 ± 0.011M/s
