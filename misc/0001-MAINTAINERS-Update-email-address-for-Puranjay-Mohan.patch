@@ -1,0 +1,61 @@
+From 6a9a3f126e8cc97b1a0b8c97518b9a9a29477341 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay@kernel.org>
+To: Alexei Starovoitov <ast@kernel.org>, Daniel Borkmann <daniel@iogearbox.net>, John Fastabend <john.fastabend@gmail.com>, bpf@vger.kernel.org, netdev@vger.kernel.org, "Björn Töpel" <bjorn@rivosinc.com>
+Date: Fri, 5 Apr 2024 13:08:49 +0000
+Subject: [PATCH bpf] MAINTAINERS: Update email address for Puranjay Mohan
+
+I would like to use the kernel.org address for kernel development from
+now on.
+
+Signed-off-by: Puranjay Mohan <puranjay@kernel.org>
+---
+ .mailmap    | 1 +
+ MAINTAINERS | 6 +++---
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/.mailmap b/.mailmap
+index 59c9a841bf71..b6930c2f68f4 100644
+--- a/.mailmap
++++ b/.mailmap
+@@ -496,6 +496,7 @@ Praveen BP <praveenbp@ti.com>
+ Pradeep Kumar Chitrapu <quic_pradeepc@quicinc.com> <pradeepc@codeaurora.org>
+ Prasad Sodagudi <quic_psodagud@quicinc.com> <psodagud@codeaurora.org>
+ Punit Agrawal <punitagrawal@gmail.com> <punit.agrawal@arm.com>
++Puranjay Mohan <puranjay@kernel.org> <puranjay12@gmail.com>
+ Qais Yousef <qyousef@layalina.io> <qais.yousef@imgtec.com>
+ Qais Yousef <qyousef@layalina.io> <qais.yousef@arm.com>
+ Quentin Monnet <qmo@kernel.org> <quentin.monnet@netronome.com>
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 6a233e1a3cf2..e2350c031578 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -553,7 +553,7 @@ F:	Documentation/devicetree/bindings/iio/accel/adi,adxl345.yaml
+ F:	drivers/input/misc/adxl34x.c
+ 
+ ADXL355 THREE-AXIS DIGITAL ACCELEROMETER DRIVER
+-M:	Puranjay Mohan <puranjay12@gmail.com>
++M:	Puranjay Mohan <puranjay@kernel.org>
+ L:	linux-iio@vger.kernel.org
+ S:	Supported
+ F:	Documentation/devicetree/bindings/iio/accel/adi,adxl355.yaml
+@@ -3714,7 +3714,7 @@ F:	drivers/iio/imu/bmi323/
+ 
+ BPF JIT for ARM
+ M:	Russell King <linux@armlinux.org.uk>
+-M:	Puranjay Mohan <puranjay12@gmail.com>
++M:	Puranjay Mohan <puranjay@kernel.org>
+ L:	bpf@vger.kernel.org
+ S:	Maintained
+ F:	arch/arm/net/
+@@ -21921,7 +21921,7 @@ F:	include/linux/soc/ti/ti_sci_inta_msi.h
+ F:	include/linux/soc/ti/ti_sci_protocol.h
+ 
+ TEXAS INSTRUMENTS' TMP117 TEMPERATURE SENSOR DRIVER
+-M:	Puranjay Mohan <puranjay12@gmail.com>
++M:	Puranjay Mohan <puranjay@kernel.org>
+ L:	linux-iio@vger.kernel.org
+ S:	Supported
+ F:	Documentation/devicetree/bindings/iio/temperature/ti,tmp117.yaml
+-- 
+2.40.1
+
