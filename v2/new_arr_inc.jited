@@ -1,0 +1,128 @@
+int trigger_arr_inc(void * ctx):
+bpf_prog_a9190cb6b16a9b1e_trigger_arr_inc:
+; for (i = 0; i < batch_iters; i++)
+   0:   add     x9, x30, #0x0
+   4:   nop
+   8:   paciasp
+   c:   stp     x29, x30, [sp, #-16]!
+  10:   mov     x29, sp
+  14:   stp     x19, x20, [sp, #-16]!
+  18:   stp     x21, x22, [sp, #-16]!
+  1c:   stp     x25, x26, [sp, #-16]!
+  20:   stp     x27, x28, [sp, #-16]!
+  24:   mov     x25, sp
+  28:   mov     x26, #0x0                       // #0
+  2c:   sub     x27, x25, #0x0
+  30:   sub     sp, sp, #0x0
+  34:   mov     x19, #0xffff8000ffffffff        // #-140733193388033
+  38:   movk    x19, #0x84b5, lsl #16
+  3c:   movk    x19, #0xe000
+  40:   ldr     w0, [x19]
+; for (i = 0; i < batch_iters; i++)
+  44:   cmp     w0, #0x1
+  48:   b.lt    0x0000000000000140  // b.tstop
+  4c:   mov     w20, #0x0                       // #0
+; p = bpf_map_lookup_elem(map, &zero);
+  50:   mov     x0, #0xffff0003ffffffff         // #-281457796841473
+  54:   movk    x0, #0xe0f3, lsl #16
+  58:   movk    x0, #0x7c00
+  5c:   mov     x1, #0xffff8000ffffffff         // #-140733193388033
+  60:   movk    x1, #0xb0c7, lsl #16
+  64:   movk    x1, #0xe000
+  68:   add     x0, x0, #0x1f0
+  6c:   ldr     w7, [x1]
+  70:   cmp     x7, #0x1
+  74:   b.cs    0x0000000000000090  // b.hs, b.nlast
+  78:   lsl     x7, x7, #3
+  7c:   add     x7, x7, x0
+  80:   ldr     x7, [x7]
+  84:   mrs     x10, tpidr_el1
+  88:   add     x7, x7, x10
+  8c:   b       0x0000000000000094
+  90:   mov     x7, #0x0                        // #0
+; if (!p) {
+  94:   cmp     x7, #0x0
+  98:   b.ne    0x0000000000000124  // b.any
+; bpf_map_update_elem(map, &zero, &zero, BPF_ANY);
+  9c:   mov     x0, #0xffff0003ffffffff         // #-281457796841473
+  a0:   movk    x0, #0xe0f3, lsl #16
+  a4:   movk    x0, #0x7c00
+  a8:   mov     x1, #0xffff8000ffffffff         // #-140733193388033
+  ac:   movk    x1, #0xb0c7, lsl #16
+  b0:   movk    x1, #0xe000
+  b4:   mov     x2, #0xffff8000ffffffff         // #-140733193388033
+  b8:   movk    x2, #0xb0c7, lsl #16
+  bc:   movk    x2, #0xe000
+  c0:   mov     x3, #0x0                        // #0
+  c4:   mov     x10, #0xffffffffffff4dd0        // #-45616
+  c8:   movk    x10, #0x802d, lsl #16
+  cc:   movk    x10, #0x8000, lsl #32
+  d0:   blr     x10
+  d4:   add     x7, x0, #0x0
+; p = bpf_map_lookup_elem(map, &zero);
+  d8:   mov     x0, #0xffff0003ffffffff         // #-281457796841473
+  dc:   movk    x0, #0xe0f3, lsl #16
+  e0:   movk    x0, #0x7c00
+  e4:   mov     x1, #0xffff8000ffffffff         // #-140733193388033
+  e8:   movk    x1, #0xb0c7, lsl #16
+  ec:   movk    x1, #0xe000
+  f0:   add     x0, x0, #0x1f0
+  f4:   ldr     w7, [x1]
+  f8:   cmp     x7, #0x1
+  fc:   b.cs    0x0000000000000118  // b.hs, b.nlast
+ 100:   lsl     x7, x7, #3
+ 104:   add     x7, x7, x0
+ 108:   ldr     x7, [x7]
+ 10c:   mrs     x10, tpidr_el1
+ 110:   add     x7, x7, x10
+ 114:   b       0x000000000000011c
+ 118:   mov     x7, #0x0                        // #0
+; if (!p)
+ 11c:   cmp     x7, #0x0
+ 120:   b.eq    0x0000000000000130  // b.none
+; *p += 1;
+ 124:   ldr     w0, [x7]
+ 128:   add     w0, w0, #0x1
+ 12c:   str     w0, [x7]
+; for (i = 0; i < batch_iters; i++)
+ 130:   add     w20, w20, #0x1
+; for (i = 0; i < batch_iters; i++)
+ 134:   ldr     w0, [x19]
+; for (i = 0; i < batch_iters; i++)
+ 138:   cmp     w20, w0
+ 13c:   b.lt    0x0000000000000050  // b.tstop
+; inc_counter2(batch_iters);
+ 140:   ldr     w19, [x19]
+; int cpu = bpf_get_smp_processor_id();
+ 144:   mov     x7, #0xffff8000ffffffff         // #-140733193388033
+ 148:   movk    x7, #0x8207, lsl #16
+ 14c:   movk    x7, #0x2008
+ 150:   mrs     x10, tpidr_el1
+ 154:   add     x7, x7, x10
+ 158:   ldr     w7, [x7]
+; __sync_add_and_fetch(&hits[cpu & CPU_MASK].value, amount);
+ 15c:   and     w7, w7, #0xff
+; __sync_add_and_fetch(&hits[cpu & CPU_MASK].value, amount);
+ 160:   lsl     x7, x7, #7
+ 164:   mov     x0, #0xffff8000ffffffff         // #-140733193388033
+ 168:   movk    x0, #0xb0c6, lsl #16
+ 16c:   movk    x0, #0xe000
+ 170:   add     x0, x0, x7
+; __sync_add_and_fetch(&hits[cpu & CPU_MASK].value, amount);
+ 174:   lsl     x19, x19, #32
+ 178:   asr     x19, x19, #32
+; __sync_add_and_fetch(&hits[cpu & CPU_MASK].value, amount);
+ 17c:   stadd   x19, [x0]
+; return 0;
+ 180:   mov     w7, #0x0                        // #0
+ 184:   mov     sp, sp
+ 188:   ldp     x27, x28, [sp], #16
+ 18c:   ldp     x25, x26, [sp], #16
+ 190:   ldp     x21, x22, [sp], #16
+ 194:   ldp     x19, x20, [sp], #16
+ 198:   ldp     x29, x30, [sp], #16
+ 19c:   add     x0, x7, #0x0
+ 1a0:   autiasp
+ 1a4:   ret
+ 1a8:   ldr     x10, 0x00000000000001b0
+ 1ac:   br      x10

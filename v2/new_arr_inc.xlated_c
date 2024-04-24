@@ -1,0 +1,71 @@
+int trigger_arr_inc(void * ctx):
+; for (i = 0; i < batch_iters; i++)
+   0: (18) r6 = map[id:156][0]+0
+   2: (61) r1 = *(u32 *)(r6 +0)
+; for (i = 0; i < batch_iters; i++)
+   3: (c6) if w1 s< 0x1 goto pc+43
+   4: (b4) w7 = 0
+; p = bpf_map_lookup_elem(map, &zero);
+   5: (18) r1 = map[id:153]
+   7: (18) r2 = map[id:157][0]+65536
+   9: (07) r1 += 496
+  10: (61) r0 = *(u32 *)(r2 +0)
+  11: (35) if r0 >= 0x1 goto pc+5
+  12: (67) r0 <<= 3
+  13: (0f) r0 += r1
+  14: (79) r0 = *(u64 *)(r0 +0)
+  15: (bf) r0 = r0
+  16: (05) goto pc+1
+  17: (b7) r0 = 0
+; if (!p) {
+  18: (55) if r0 != 0x0 goto pc+22
+; bpf_map_update_elem(map, &zero, &zero, BPF_ANY);
+  19: (18) r1 = map[id:153]
+  21: (18) r2 = map[id:157][0]+65536
+  23: (18) r3 = map[id:157][0]+65536
+  25: (b7) r4 = 0
+  26: (85) call array_map_update_elem#317352
+; p = bpf_map_lookup_elem(map, &zero);
+  27: (18) r1 = map[id:153]
+  29: (18) r2 = map[id:157][0]+65536
+  31: (07) r1 += 496
+  32: (61) r0 = *(u32 *)(r2 +0)
+  33: (35) if r0 >= 0x1 goto pc+5
+  34: (67) r0 <<= 3
+  35: (0f) r0 += r1
+  36: (79) r0 = *(u64 *)(r0 +0)
+  37: (bf) r0 = r0
+  38: (05) goto pc+1
+  39: (b7) r0 = 0
+; if (!p)
+  40: (15) if r0 == 0x0 goto pc+3
+; *p += 1;
+  41: (61) r1 = *(u32 *)(r0 +0)
+  42: (04) w1 += 1
+  43: (63) *(u32 *)(r0 +0) = r1
+; for (i = 0; i < batch_iters; i++)
+  44: (04) w7 += 1
+; for (i = 0; i < batch_iters; i++)
+  45: (61) r1 = *(u32 *)(r6 +0)
+; for (i = 0; i < batch_iters; i++)
+  46: (ce) if w7 s< w1 goto pc-42
+; inc_counter2(batch_iters);
+  47: (61) r6 = *(u32 *)(r6 +0)
+; int cpu = bpf_get_smp_processor_id();
+  48: (18) r0 = 0xffff800082072008
+  50: (bf) r0 = r0
+  51: (61) r0 = *(u32 *)(r0 +0)
+; __sync_add_and_fetch(&hits[cpu & CPU_MASK].value, amount);
+  52: (54) w0 &= 255
+; __sync_add_and_fetch(&hits[cpu & CPU_MASK].value, amount);
+  53: (67) r0 <<= 7
+  54: (18) r1 = map[id:157][0]+0
+  56: (0f) r1 += r0
+; __sync_add_and_fetch(&hits[cpu & CPU_MASK].value, amount);
+  57: (67) r6 <<= 32
+  58: (c7) r6 s>>= 32
+; __sync_add_and_fetch(&hits[cpu & CPU_MASK].value, amount);
+  59: (db) lock *(u64 *)(r1 +0) += r6
+; return 0;
+  60: (b4) w0 = 0
+  61: (95) exit

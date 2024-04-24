@@ -1,0 +1,116 @@
+int trigger_arr_inc(void * ctx):
+bpf_prog_a9190cb6b16a9b1e_trigger_arr_inc:
+; for (i = 0; i < batch_iters; i++)
+   0:   add     x9, x30, #0x0
+   4:   nop
+   8:   paciasp
+   c:   stp     x29, x30, [sp, #-16]!
+  10:   mov     x29, sp
+  14:   stp     x19, x20, [sp, #-16]!
+  18:   stp     x21, x22, [sp, #-16]!
+  1c:   stp     x25, x26, [sp, #-16]!
+  20:   stp     x27, x28, [sp, #-16]!
+  24:   mov     x25, sp
+  28:   mov     x26, #0x0                       // #0
+  2c:   sub     x27, x25, #0x0
+  30:   sub     sp, sp, #0x0
+  34:   mov     x19, #0xffff8000ffffffff        // #-140733193388033
+  38:   movk    x19, #0x85eb, lsl #16
+  3c:   movk    x19, #0x6000
+  40:   ldr     w0, [x19]
+; for (i = 0; i < batch_iters; i++)
+  44:   cmp     w0, #0x1
+  48:   b.lt    0x0000000000000110  // b.tstop
+  4c:   mov     w20, #0x0                       // #0
+; p = bpf_map_lookup_elem(map, &zero);
+  50:   mov     x0, #0xffff0003ffffffff         // #-281457796841473
+  54:   movk    x0, #0xce5c, lsl #16
+  58:   movk    x0, #0xca00
+  5c:   mov     x1, #0xffff8000ffffffff         // #-140733193388033
+  60:   movk    x1, #0x8bdb, lsl #16
+  64:   movk    x1, #0x6000
+  68:   mov     x10, #0xffffffffffff3ed0        // #-49456
+  6c:   movk    x10, #0x802d, lsl #16
+  70:   movk    x10, #0x8000, lsl #32
+  74:   blr     x10
+  78:   add     x7, x0, #0x0
+; if (!p) {
+  7c:   cmp     x7, #0x0
+  80:   b.ne    0x00000000000000f4  // b.any
+; bpf_map_update_elem(map, &zero, &zero, BPF_ANY);
+  84:   mov     x0, #0xffff0003ffffffff         // #-281457796841473
+  88:   movk    x0, #0xce5c, lsl #16
+  8c:   movk    x0, #0xca00
+  90:   mov     x1, #0xffff8000ffffffff         // #-140733193388033
+  94:   movk    x1, #0x8bdb, lsl #16
+  98:   movk    x1, #0x6000
+  9c:   mov     x2, #0xffff8000ffffffff         // #-140733193388033
+  a0:   movk    x2, #0x8bdb, lsl #16
+  a4:   movk    x2, #0x6000
+  a8:   mov     x3, #0x0                        // #0
+  ac:   mov     x10, #0xffffffffffff4d70        // #-45712
+  b0:   movk    x10, #0x802d, lsl #16
+  b4:   movk    x10, #0x8000, lsl #32
+  b8:   blr     x10
+  bc:   add     x7, x0, #0x0
+; p = bpf_map_lookup_elem(map, &zero);
+  c0:   mov     x0, #0xffff0003ffffffff         // #-281457796841473
+  c4:   movk    x0, #0xce5c, lsl #16
+  c8:   movk    x0, #0xca00
+  cc:   mov     x1, #0xffff8000ffffffff         // #-140733193388033
+  d0:   movk    x1, #0x8bdb, lsl #16
+  d4:   movk    x1, #0x6000
+  d8:   mov     x10, #0xffffffffffff3ed0        // #-49456
+  dc:   movk    x10, #0x802d, lsl #16
+  e0:   movk    x10, #0x8000, lsl #32
+  e4:   blr     x10
+  e8:   add     x7, x0, #0x0
+; if (!p)
+  ec:   cmp     x7, #0x0
+  f0:   b.eq    0x0000000000000100  // b.none
+; *p += 1;
+  f4:   ldr     w0, [x7]
+  f8:   add     w0, w0, #0x1
+  fc:   str     w0, [x7]
+; for (i = 0; i < batch_iters; i++)
+ 100:   add     w20, w20, #0x1
+; for (i = 0; i < batch_iters; i++)
+ 104:   ldr     w0, [x19]
+; for (i = 0; i < batch_iters; i++)
+ 108:   cmp     w20, w0
+ 10c:   b.lt    0x0000000000000050  // b.tstop
+; inc_counter2(batch_iters);
+ 110:   ldr     w19, [x19]
+; int cpu = bpf_get_smp_processor_id();
+ 114:   mov     x10, #0xfffffffffffff4d0        // #-2864
+ 118:   movk    x10, #0x802b, lsl #16
+ 11c:   movk    x10, #0x8000, lsl #32
+ 120:   blr     x10
+ 124:   add     x7, x0, #0x0
+; __sync_add_and_fetch(&hits[cpu & CPU_MASK].value, amount);
+ 128:   and     w7, w7, #0xff
+; __sync_add_and_fetch(&hits[cpu & CPU_MASK].value, amount);
+ 12c:   lsl     x7, x7, #7
+ 130:   mov     x0, #0xffff8000ffffffff         // #-140733193388033
+ 134:   movk    x0, #0x8bda, lsl #16
+ 138:   movk    x0, #0x6000
+ 13c:   add     x0, x0, x7
+; __sync_add_and_fetch(&hits[cpu & CPU_MASK].value, amount);
+ 140:   lsl     x19, x19, #32
+ 144:   asr     x19, x19, #32
+; __sync_add_and_fetch(&hits[cpu & CPU_MASK].value, amount);
+ 148:   stadd   x19, [x0]
+; return 0;
+ 14c:   mov     w7, #0x0                        // #0
+ 150:   mov     sp, sp
+ 154:   ldp     x27, x28, [sp], #16
+ 158:   ldp     x25, x26, [sp], #16
+ 15c:   ldp     x21, x22, [sp], #16
+ 160:   ldp     x19, x20, [sp], #16
+ 164:   ldp     x29, x30, [sp], #16
+ 168:   add     x0, x7, #0x0
+ 16c:   autiasp
+ 170:   ret
+ 174:   nop
+ 178:   ldr     x10, 0x0000000000000180
+ 17c:   br      x10
