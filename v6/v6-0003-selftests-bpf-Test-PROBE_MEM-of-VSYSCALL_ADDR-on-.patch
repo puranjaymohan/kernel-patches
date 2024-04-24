@@ -1,0 +1,111 @@
+From c79aaa39f28d258fd7344fa427695f63bfcda2d0 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay@kernel.org>
+Date: Tue, 23 Apr 2024 12:43:05 +0000
+Subject: [PATCH bpf v6 3/3] selftests/bpf: Test PROBE_MEM of VSYSCALL_ADDR on
+ x86-64
+
+The vsyscall is a legacy API for fast execution of system calls. It maps
+a page at address VSYSCALL_ADDR into the userspace program. This address
+is in the top 10MB of the address space:
+
+ffffffffff600000 - ffffffffff600fff |    4 kB | legacy vsyscall ABI
+
+The last commit fixes the x86-64 BPF JIT to skip accessing addresses in
+this memory region. Add this address to bpf_testmod_return_ptr() so we
+can make sure that it is fixed.
+
+Without the previous commit, subprogs_extable will crash the kernel like
+following:
+
+[root@localhost bpf]# ./test_progs -t subprogs_extable
+ bpf_testmod: loading out-of-tree module taints kernel.
+ bpf_testmod: module verification failed: signature and/or required key missing - tainting kernel
+ BUG: unable to handle page fault for address: ffffffffff600000
+ #PF: supervisor read access in kernel mode
+ #PF: error_code(0x0000) - not-present page
+ PGD 2e64067 P4D 2e65067 PUD 2e67067 PMD 2e69067 PTE 0
+ Oops: 0000 [#1] PREEMPT SMP NOPTI
+ CPU: 0 PID: 1577 Comm: test_progs Tainted: G           OE      6.9.0-rc2+ #5
+ Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.16.0-0-gd239552ce722-prebuilt.qemu.org 04/01/2014
+ RIP: 0010:bpf_prog_7b3a898880dd066d_handle_fexit_ret_subprogs3+0x22/0x77
+ Code: cc cc cc cc cc cc cc cc 0f 1f 44 00 00 66 90 55 48 89 e5 48 8b 7f 08 49 bb 00 00 00 00 00 00 00 01 4c 39 df 73 04 31 f6 eb 04 <48> 8b 77 00 49 bb 00 00 00 00 00 00 00 01 48 81 c7 50 00 00 00 4c
+ RSP: 0018:ffa0000000e67d58 EFLAGS: 00010282
+ RAX: 0000000000000001 RBX: 0000000000000001 RCX: 0000000000000001
+ RDX: 00c0fffec4022e48 RSI: ff110001027f8ec8 RDI: ffffffffff600001
+ RBP: ffa0000000e67d58 R08: 0000000000000000 R09: ff110001027f8e78
+ R10: 0000000000000002 R11: 0100000000000000 R12: 0000000000000015
+ R13: 0000000000000016 R14: 00000000000001c8 R15: ff11000102364800
+ FS:  00007fc49c2cc740(0000) GS:ff1100013bc00000(0000) knlGS:0000000000000000
+ CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+ CR2: ffffffffff600001 CR3: 0000000106ec2004 CR4: 0000000000771ef0
+ DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+ DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+ PKRU: 55555554
+ Call Trace:
+  <TASK>
+  ? __die+0x20/0x70
+  ? page_fault_oops+0x81/0x150
+  ? __lock_acquire+0x4ee/0xb50
+  ? exc_page_fault+0x68/0x210
+  ? asm_exc_page_fault+0x22/0x30
+  ? bpf_prog_7b3a898880dd066d_handle_fexit_ret_subprogs3+0x22/0x77
+  bpf_trampoline_169651331182+0x64/0x157
+  bpf_testmod_return_ptr+0x5/0xe0 [bpf_testmod]
+  bpf_testmod_test_read+0x6d/0x420 [bpf_testmod]
+  kernfs_file_read_iter+0xb5/0x1e0
+  vfs_read+0x210/0x340
+  ksys_read+0x65/0xf0
+  do_syscall_64+0x69/0x140
+  entry_SYSCALL_64_after_hwframe+0x71/0x79
+ RIP: 0033:0x7fc49c13e8b2
+ Code: c0 e9 b2 fe ff ff 50 48 8d 3d ea 0e 08 00 e8 65 ea 01 00 0f 1f 44 00 00 f3 0f 1e fa 64 8b 04 25 18 00 00 00 85 c0 75 10 0f 05 <48> 3d 00 f0 ff ff 77 56 c3 0f 1f 44 00 00 48 83 ec 28 48 89 54 24
+ RSP: 002b:00007fffafe0a5a8 EFLAGS: 00000246 ORIG_RAX: 0000000000000000
+ RAX: ffffffffffffffda RBX: 0000000000000000 RCX: 00007fc49c13e8b2
+ RDX: 00000000000001c8 RSI: 0000000000000000 RDI: 000000000000000a
+ RBP: 00007fffafe0a5e0 R08: 0000000000000000 R09: 00007fffafe0a487
+ R10: 0000000000000000 R11: 0000000000000246 R12: 00007fffafe0a898
+ R13: 00000000006eb8c6 R14: 0000000000f51db0 R15: 00007fc49c344000
+  </TASK>
+ Modules linked in: bpf_testmod(OE) kvm_intel
+ CR2: ffffffffff600001
+ ---[ end trace 0000000000000000 ]---
+ RIP: 0010:bpf_prog_7b3a898880dd066d_handle_fexit_ret_subprogs3+0x22/0x77
+ Code: cc cc cc cc cc cc cc cc 0f 1f 44 00 00 66 90 55 48 89 e5 48 8b 7f 08 49 bb 00 00 00 00 00 00 00 01 4c 39 df 73 04 31 f6 eb 04 <48> 8b 77 00 49 bb 00 00 00 00 00 00 00 01 48 81 c7 50 00 00 00 4c
+ RSP: 0018:ffa0000000e67d58 EFLAGS: 00010282
+ RAX: 0000000000000001 RBX: 0000000000000001 RCX: 0000000000000001
+ RDX: 00c0fffec4022e48 RSI: ff110001027f8ec8 RDI: ffffffffff600001
+ RBP: ffa0000000e67d58 R08: 0000000000000000 R09: ff110001027f8e78
+ R10: 0000000000000002 R11: 0100000000000000 R12: 0000000000000015
+ R13: 0000000000000016 R14: 00000000000001c8 R15: ff11000102364800
+ FS:  00007fc49c2cc740(0000) GS:ff1100013bc00000(0000) knlGS:0000000000000000
+ CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+ CR2: ffffffffff600001 CR3: 0000000106ec2004 CR4: 0000000000771ef0
+ DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+ DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+ PKRU: 55555554
+ Kernel panic - not syncing: Fatal exception
+ Kernel Offset: disabled
+ ---[ end Kernel panic - not syncing: Fatal exception ]---
+
+Signed-off-by: Puranjay Mohan <puranjay@kernel.org>
+---
+ tools/testing/selftests/bpf/bpf_testmod/bpf_testmod.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/tools/testing/selftests/bpf/bpf_testmod/bpf_testmod.c b/tools/testing/selftests/bpf/bpf_testmod/bpf_testmod.c
+index 39ad96a18123..1068320fd3a4 100644
+--- a/tools/testing/selftests/bpf/bpf_testmod/bpf_testmod.c
++++ b/tools/testing/selftests/bpf/bpf_testmod/bpf_testmod.c
+@@ -205,6 +205,9 @@ __weak noinline struct file *bpf_testmod_return_ptr(int arg)
+ 	case 5: return (void *)~(1ull << 30);	/* trigger extable */
+ 	case 6: return &f;			/* valid addr */
+ 	case 7: return (void *)((long)&f | 1);	/* kernel tricks */
++#ifdef CONFIG_X86_64
++	case 8: return (void *)VSYSCALL_ADDR;   /* vsyscall page address*/
++#endif
+ 	default: return NULL;
+ 	}
+ }
+-- 
+2.40.1
+

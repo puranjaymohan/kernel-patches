@@ -1,0 +1,41 @@
+From dc8966edc296c641a7993d97e9404449b4223c33 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay@kernel.org>
+Date: Tue, 23 Apr 2024 12:43:05 +0000
+Subject: [PATCH bpf v6 3/3] selftests/bpf: Test PROBE_MEM of VSYSCALL_ADDR on
+ x86-64
+
+The vsyscall is a legacy API for fast execution of system calls. It maps
+a page at address VSYSCALL_ADDR into the userspace program. This address
+is in the top 10MB of the address space:
+
+ffffffffff600000 - ffffffffff600fff |    4 kB | legacy vsyscall ABI
+
+The last commit fixes the x86-64 BPF JIT to skip accessing addresses in
+this memory region. Add this address to bpf_testmod_return_ptr() so we
+can make sure that it is fixed.
+
+After this change and without the previous commit, subprogs_extable
+selftest will crash the kernel.
+
+Signed-off-by: Puranjay Mohan <puranjay@kernel.org>
+---
+ tools/testing/selftests/bpf/bpf_testmod/bpf_testmod.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/tools/testing/selftests/bpf/bpf_testmod/bpf_testmod.c b/tools/testing/selftests/bpf/bpf_testmod/bpf_testmod.c
+index 39ad96a18123..edcd26106557 100644
+--- a/tools/testing/selftests/bpf/bpf_testmod/bpf_testmod.c
++++ b/tools/testing/selftests/bpf/bpf_testmod/bpf_testmod.c
+@@ -205,6 +205,9 @@ __weak noinline struct file *bpf_testmod_return_ptr(int arg)
+ 	case 5: return (void *)~(1ull << 30);	/* trigger extable */
+ 	case 6: return &f;			/* valid addr */
+ 	case 7: return (void *)((long)&f | 1);	/* kernel tricks */
++#ifdef CONFIG_X86_64
++	case 8: return (void *)VSYSCALL_ADDR;   /* vsyscall page address */
++#endif
+ 	default: return NULL;
+ 	}
+ }
+-- 
+2.40.1
+
