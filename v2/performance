@@ -1,0 +1,22 @@
+Running the benchmarks three times before and after:
+
+
+Before:
+
+
+After:
+
+[root@ip-172-31-2-216 bpf]# ./benchs/run_bench_trigger.sh glob-arr-inc arr-inc hash-inc
+glob-arr-inc   :   24.601 ± 0.013M/s
+arr-inc        :   23.733 ± 0.027M/s
+hash-inc       :   12.611 ± 0.008M/s
+
+[root@ip-172-31-2-216 bpf]# ./benchs/run_bench_trigger.sh glob-arr-inc arr-inc hash-inc
+glob-arr-inc   :   24.631 ± 0.027M/s
+arr-inc        :   23.742 ± 0.023M/s
+hash-inc       :   12.625 ± 0.004M/s
+
+[root@ip-172-31-2-216 bpf]# ./benchs/run_bench_trigger.sh glob-arr-inc arr-inc hash-inc
+glob-arr-inc   :   24.616 ± 0.038M/s
+arr-inc        :   23.748 ± 0.017M/s
+hash-inc       :   12.626 ± 0.007M/s

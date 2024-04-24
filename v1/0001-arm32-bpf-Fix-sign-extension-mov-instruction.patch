@@ -1,0 +1,63 @@
+From 2929be955eb1278e9b074086157e42122ff87c6e Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay@kernel.org>
+To: Alexei Starovoitov <ast@kernel.org>,Daniel Borkmann <daniel@iogearbox.net>,Andrii Nakryiko <andrii@kernel.org>,Martin KaFai Lau <martin.lau@linux.dev>,Eduard Zingerman <eddyz87@gmail.com>,Song Liu <song@kernel.org>,Yonghong Song <yonghong.song@linux.dev>,John Fastabend <john.fastabend@gmail.com>,KP Singh <kpsingh@kernel.org>,Stanislav Fomichev <sdf@google.com>,Hao Luo <haoluo@google.com>,Jiri Olsa <jolsa@kernel.org>,Russell King <linux@armlinux.org.uk>,"Russell King (Oracle)" <rmk+kernel@armlinux.org.uk>,bpf@vger.kernel.org,linux-arm-kernel@lists.infradead.org,linux-kernel@vger.kernel.org
+Date: Tue, 9 Apr 2024 08:42:25 +0000
+Subject: [PATCH bpf] arm32, bpf: Fix sign-extension mov instruction
+
+The current implementation of the mov instruction with sign extension
+clobbers the source register because it sign extends the source and then
+moves it to the destination.
+
+Fix this by moving the src to a temporary register before doing the sign
+extension only if src is not an emulated register (on the scratch stack).
+
+Also fix the emit_a32_movsx_r64() to put the register back on scratch
+stack if that register is emulated on stack.
+
+Fixes: fc832653fa0d ("arm32, bpf: add support for sign-extension mov instruction")
+Reported-by: syzbot+186522670e6722692d86@syzkaller.appspotmail.com
+Closes: https://lore.kernel.org/all/000000000000e9a8d80615163f2a@google.com/
+Signed-off-by: Puranjay Mohan <puranjay@kernel.org>
+---
+ arch/arm/net/bpf_jit_32.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/net/bpf_jit_32.c b/arch/arm/net/bpf_jit_32.c
+index 1d672457d02f..8fde6ab66cb4 100644
+--- a/arch/arm/net/bpf_jit_32.c
++++ b/arch/arm/net/bpf_jit_32.c
+@@ -878,6 +878,13 @@ static inline void emit_a32_mov_r(const s8 dst, const s8 src, const u8 off,
+ 
+ 	rt = arm_bpf_get_reg32(src, tmp[0], ctx);
+ 	if (off && off != 32) {
++		/* If rt is not a stacked register, move it to tmp, so it doesn't get clobbered by
++		 * the shift operations.
++		 */
++		if (rt == src) {
++			emit(ARM_MOV_R(tmp[0], rt), ctx);
++			rt = tmp[0];
++		}
+ 		emit(ARM_LSL_I(rt, rt, 32 - off), ctx);
+ 		emit(ARM_ASR_I(rt, rt, 32 - off), ctx);
+ 	}
+@@ -919,15 +926,15 @@ static inline void emit_a32_movsx_r64(const bool is64, const u8 off, const s8 ds
+ 	const s8 *tmp = bpf2a32[TMP_REG_1];
+ 	const s8 *rt;
+ 
+-	rt = arm_bpf_get_reg64(dst, tmp, ctx);
+-
+ 	emit_a32_mov_r(dst_lo, src_lo, off, ctx);
+ 	if (!is64) {
+ 		if (!ctx->prog->aux->verifier_zext)
+ 			/* Zero out high 4 bytes */
+ 			emit_a32_mov_i(dst_hi, 0, ctx);
+ 	} else {
++		rt = arm_bpf_get_reg64(dst, tmp, ctx);
+ 		emit(ARM_ASR_I(rt[0], rt[1], 31), ctx);
++		arm_bpf_put_reg64(dst, rt, ctx);
+ 	}
+ }
+ 
+-- 
+2.40.1
+
