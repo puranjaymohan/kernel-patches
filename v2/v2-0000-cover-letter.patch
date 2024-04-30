@@ -1,0 +1,52 @@
+From 92f0a45f24d855fc69c0318af89ce04835087dee Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay@kernel.org>
+To: Alexei Starovoitov <ast@kernel.org>,Daniel Borkmann <daniel@iogearbox.net>,Andrii Nakryiko <andrii@kernel.org>,Martin KaFai Lau <martin.lau@linux.dev>,Eduard Zingerman <eddyz87@gmail.com>,Song Liu <song@kernel.org>,Yonghong Song <yonghong.song@linux.dev>,John Fastabend <john.fastabend@gmail.com>,KP Singh <kpsingh@kernel.org>,Stanislav Fomichev <sdf@google.com>,Hao Luo <haoluo@google.com>,Jiri Olsa <jolsa@kernel.org>,"Björn Töpel" <bjorn@kernel.org>,Paul Walmsley <paul.walmsley@sifive.com>,Palmer Dabbelt <palmer@dabbelt.com>,Albert Ou <aou@eecs.berkeley.edu>,bpf@vger.kernel.org,linux-riscv@lists.infradead.org,linux-kernel@vger.kernel.org, Pu Lehui <pulehui@huawei.com>
+Date: Tue, 30 Apr 2024 17:02:51 +0000
+Subject: [PATCH bpf-next v2 0/2] riscv, bpf: Support per-CPU insn and inline bpf_get_smp_processor_id()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Changes in v1->v2:
+v1: https://lore.kernel.org/all/20240405124348.27644-1-puranjay12@gmail.com/
+- Use emit_addr() in place of emit_imm() in the first patch.
+- Add the second patch to inline bpf_get_smp_processor_id()
+
+The first patch add the support for the internal-only MOV instruction to
+resolve per-CPU addrs to absolute addresses.
+RISC-V uses generic per-cpu implementation where the offsets for CPUs are
+kept in an array called __per_cpu_offset[cpu_number]. RISCV stores the
+address of the task_struct in TP register. The first element in task_struct
+is struct thread_info, and we can get the cpu number by reading from the TP
+register + offsetof(struct thread_info, cpu).
+
+The second patch inlines the calls bpf_get_smp_processor_id() in the JIT
+by emitting a load from the TP + offsetof(struct thread_info, cpu).
+
+Benchmark using [1] on Qemu.
+
+  ./benchs/run_bench_trigger.sh glob-arr-inc arr-inc hash-inc
+
+  +---------------+------------------+------------------+--------------+
+  |      Name     |     Before       |       After      |   % change   |
+  |---------------+------------------+------------------+--------------|
+  | glob-arr-inc  | 1.077 ± 0.006M/s | 1.336 ± 0.010M/s |   + 24.04%   |
+  | arr-inc       | 1.078 ± 0.002M/s | 1.332 ± 0.015M/s |   + 23.56%   |
+  | hash-inc      | 0.494 ± 0.004M/s | 0.653 ± 0.001M/s |   + 32.18%   |
+  +---------------+------------------+------------------+--------------+
+
+[1] https://github.com/anakryiko/linux/commit/8dec900975ef
+
+Puranjay Mohan (2):
+  riscv, bpf: add internal-only MOV instruction to resolve per-CPU addrs
+  riscv, bpf: inline bpf_get_smp_processor_id()
+
+ arch/riscv/net/bpf_jit_comp64.c | 50 +++++++++++++++++++++++++++++++++
+ include/linux/filter.h          |  1 +
+ kernel/bpf/core.c               | 11 ++++++++
+ kernel/bpf/verifier.c           |  2 ++
+ 4 files changed, 64 insertions(+)
+
+-- 
+2.40.1
+

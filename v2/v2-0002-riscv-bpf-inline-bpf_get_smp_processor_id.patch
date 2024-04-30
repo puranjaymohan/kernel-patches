@@ -1,0 +1,141 @@
+From 92f0a45f24d855fc69c0318af89ce04835087dee Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay@kernel.org>
+Date: Mon, 29 Apr 2024 15:07:33 +0000
+Subject: [PATCH bpf-next v2 2/2] riscv, bpf: inline bpf_get_smp_processor_id()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Inline the calls to bpf_get_smp_processor_id() in the riscv bpf jit.
+
+RISCV saves the pointer to the CPU's task_struct in the TP (thread
+pointer) register. This makes it trivial to get the CPU's processor id.
+As thread_info is the first member of task_struct, we can read the
+processor id from TP + offsetof(struct thread_info, cpu).
+
+          RISCV64 JIT output for `call bpf_get_smp_processor_id`
+	  ======================================================
+
+                Before                           After
+               --------                         -------
+
+         auipc   t1,0x848c                  ld    a5,32(tp)
+         jalr    604(t1)
+         mv      a5,a0
+
+Benchmark using [1] on Qemu.
+
+./benchs/run_bench_trigger.sh glob-arr-inc arr-inc hash-inc
+
++---------------+------------------+------------------+--------------+
+|      Name     |     Before       |       After      |   % change   |
+|---------------+------------------+------------------+--------------|
+| glob-arr-inc  | 1.077 ± 0.006M/s | 1.336 ± 0.010M/s |   + 24.04%   |
+| arr-inc       | 1.078 ± 0.002M/s | 1.332 ± 0.015M/s |   + 23.56%   |
+| hash-inc      | 0.494 ± 0.004M/s | 0.653 ± 0.001M/s |   + 32.18%   |
++---------------+------------------+------------------+--------------+
+
+NOTE: This benchmark includes changes from this patch and the previous
+      patch that implemented the per-cpu insn.
+
+[1] https://github.com/anakryiko/linux/commit/8dec900975ef
+
+Signed-off-by: Puranjay Mohan <puranjay@kernel.org>
+---
+ arch/riscv/net/bpf_jit_comp64.c | 26 ++++++++++++++++++++++++++
+ include/linux/filter.h          |  1 +
+ kernel/bpf/core.c               | 11 +++++++++++
+ kernel/bpf/verifier.c           |  2 ++
+ 4 files changed, 40 insertions(+)
+
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 99d7006f1420..5789b7afae47 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -1493,6 +1493,22 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 		bool fixed_addr;
+ 		u64 addr;
+ 
++		/* Inline calls to bpf_get_smp_processor_id()
++		 *
++		 * RV_REG_TP holds the address of the current CPU's task_struct and thread_info is
++		 * at offset 0 in task_struct.
++		 * Load cpu from thread_info:
++		 *     Set R0 to ((struct thread_info *)(RV_REG_TP))->cpu
++		 *
++		 * This replicates the implementation of raw_smp_processor_id() on RISCV
++		 */
++		if (insn->src_reg == 0 && insn->imm == BPF_FUNC_get_smp_processor_id) {
++			/* Load current CPU number in R0 */
++			emit_ld(bpf_to_rv_reg(BPF_REG_0, ctx), offsetof(struct thread_info, cpu),
++				RV_REG_TP, ctx);
++			break;
++		}
++
+ 		mark_call(ctx);
+ 		ret = bpf_jit_get_func_addr(ctx->prog, insn, extra_pass,
+ 					    &addr, &fixed_addr);
+@@ -2062,3 +2078,13 @@ bool bpf_jit_supports_percpu_insn(void)
+ {
+ 	return true;
+ }
++
++bool bpf_jit_inlines_helper_call(s32 imm)
++{
++	switch (imm) {
++	case BPF_FUNC_get_smp_processor_id:
++		return true;
++	}
++
++	return false;
++}
+diff --git a/include/linux/filter.h b/include/linux/filter.h
+index 7a27f19bf44d..3e19bb62ed1a 100644
+--- a/include/linux/filter.h
++++ b/include/linux/filter.h
+@@ -993,6 +993,7 @@ u64 __bpf_call_base(u64 r1, u64 r2, u64 r3, u64 r4, u64 r5);
+ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog);
+ void bpf_jit_compile(struct bpf_prog *prog);
+ bool bpf_jit_needs_zext(void);
++bool bpf_jit_inlines_helper_call(s32 imm);
+ bool bpf_jit_supports_subprog_tailcalls(void);
+ bool bpf_jit_supports_percpu_insn(void);
+ bool bpf_jit_supports_kfunc_call(void);
+diff --git a/kernel/bpf/core.c b/kernel/bpf/core.c
+index 99b8b1c9a248..aa59af9f9bd9 100644
+--- a/kernel/bpf/core.c
++++ b/kernel/bpf/core.c
+@@ -2941,6 +2941,17 @@ bool __weak bpf_jit_needs_zext(void)
+ 	return false;
+ }
+ 
++/* Return true if the JIT inlines the call to the helper corresponding to
++ * the imm.
++ *
++ * The verifier will not patch the insn->imm for the call to the helper if
++ * this returns true.
++ */
++bool __weak bpf_jit_inlines_helper_call(s32 imm)
++{
++	return false;
++}
++
+ /* Return TRUE if the JIT backend supports mixing bpf2bpf and tailcalls. */
+ bool __weak bpf_jit_supports_subprog_tailcalls(void)
+ {
+diff --git a/kernel/bpf/verifier.c b/kernel/bpf/verifier.c
+index 5d42db05315e..e78f766d7f91 100644
+--- a/kernel/bpf/verifier.c
++++ b/kernel/bpf/verifier.c
+@@ -20013,6 +20013,8 @@ static int do_misc_fixups(struct bpf_verifier_env *env)
+ 			goto next_insn;
+ 		}
+ 
++		if (bpf_jit_inlines_helper_call(insn->imm))
++			goto next_insn;
+ 		if (insn->imm == BPF_FUNC_get_route_realm)
+ 			prog->dst_needed = 1;
+ 		if (insn->imm == BPF_FUNC_get_prandom_u32)
+-- 
+2.40.1
+

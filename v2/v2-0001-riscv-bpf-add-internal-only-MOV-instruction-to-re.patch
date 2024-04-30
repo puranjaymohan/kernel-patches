@@ -1,0 +1,94 @@
+From adc96df7e72ac732ec5570259c387799c01239bb Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay@kernel.org>
+Date: Fri, 5 Apr 2024 11:17:26 +0000
+Subject: [PATCH bpf-next v2 1/2] riscv, bpf: add internal-only MOV instruction
+ to resolve per-CPU addrs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Support an instruction for resolving absolute addresses of per-CPU
+data from their per-CPU offsets. This instruction is internal-only and
+users are not allowed to use them directly. They will only be used for
+internal inlining optimizations for now between BPF verifier and BPF
+JITs.
+
+RISC-V uses generic per-cpu implementation where the offsets for CPUs
+are kept in an array called __per_cpu_offset[cpu_number]. RISCV stores
+the address of the task_struct in TP register. The first element in
+task_struct is struct thread_info, and we can get the cpu number by
+reading from the TP register + offsetof(struct thread_info, cpu).
+
+Once we have the cpu number in a register we read the offset for that
+cpu from address: &__per_cpu_offset + cpu_number << 3. Then we add this
+offset to the destination register.
+
+To measure the improvement from this change, the benchmark in [1] was
+used on Qemu:
+
+Before:
+glob-arr-inc   :    1.127 ± 0.013M/s
+arr-inc        :    1.121 ± 0.004M/s
+hash-inc       :    0.681 ± 0.052M/s
+
+After:
+glob-arr-inc   :    1.138 ± 0.011M/s
+arr-inc        :    1.366 ± 0.006M/s
+hash-inc       :    0.676 ± 0.001M/s
+
+[1] https://github.com/anakryiko/linux/commit/8dec900975ef
+
+Signed-off-by: Puranjay Mohan <puranjay@kernel.org>
+---
+ arch/riscv/net/bpf_jit_comp64.c | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 15e482f2c657..99d7006f1420 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -12,6 +12,7 @@
+ #include <linux/stop_machine.h>
+ #include <asm/patch.h>
+ #include <asm/cfi.h>
++#include <asm/percpu.h>
+ #include "bpf_jit.h"
+ 
+ #define RV_FENTRY_NINSNS 2
+@@ -1089,6 +1090,24 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 			emit_or(RV_REG_T1, rd, RV_REG_T1, ctx);
+ 			emit_mv(rd, RV_REG_T1, ctx);
+ 			break;
++		} else if (insn_is_mov_percpu_addr(insn)) {
++			if (rd != rs)
++				emit_mv(rd, rs, ctx);
++#ifdef CONFIG_SMP
++				/* Load current CPU number in T1 */
++				emit_ld(RV_REG_T1, offsetof(struct thread_info, cpu),
++					RV_REG_TP, ctx);
++				/* << 3 because offsets are 8 bytes */
++				emit_slli(RV_REG_T1, RV_REG_T1, 3, ctx);
++				/* Load address of __per_cpu_offset array in T2 */
++				emit_addr(RV_REG_T2, (u64)&__per_cpu_offset, extra_pass, ctx);
++				/* Add offset of current CPU to  __per_cpu_offset */
++				emit_add(RV_REG_T1, RV_REG_T2, RV_REG_T1, ctx);
++				/* Load __per_cpu_offset[cpu] in T1 */
++				emit_ld(RV_REG_T1, 0, RV_REG_T1, ctx);
++				/* Add the offset to Rd */
++				emit_add(rd, rd, RV_REG_T1, ctx);
++#endif
+ 		}
+ 		if (imm == 1) {
+ 			/* Special mov32 for zext */
+@@ -2038,3 +2057,8 @@ bool bpf_jit_supports_arena(void)
+ {
+ 	return true;
+ }
++
++bool bpf_jit_supports_percpu_insn(void)
++{
++	return true;
++}
+-- 
+2.40.1
+
