@@ -1,0 +1,93 @@
+From 587629b4eb41e6b07c971fad65d6a09365f76c26 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay@kernel.org>
+Date: Wed, 24 Apr 2024 13:27:08 +0000
+Subject: [PATCH bpf-next v2 2/2] bpf, arm64: inline bpf_get_smp_processor_id()
+ helper
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+As ARM64 JIT now implements BPF_MOV64_PERCPU_REG instruction, inline
+bpf_get_smp_processor_id().
+
+ARM64 uses the per-cpu variable cpu_number to store the cpu id.
+
+Here is how the BPF and ARM64 JITed assembly changes after this commit:
+
+                                         BPF
+         		                =====
+              BEFORE                                       AFTER
+             --------                                     -------
+
+int cpu = bpf_get_smp_processor_id();           int cpu = bpf_get_smp_processor_id();
+(85) call bpf_get_smp_processor_id#229032       (18) r0 = 0xffff800082072008
+                                                (bf) r0 = r0
+                                                (61) r0 = *(u32 *)(r0 +0)
+
+				      ARM64 JIT
+				     ===========
+
+              BEFORE                                       AFTER
+             --------                                     -------
+
+int cpu = bpf_get_smp_processor_id();      int cpu = bpf_get_smp_processor_id();
+mov     x10, #0xfffffffffffff4d0           mov     x7, #0xffff8000ffffffff
+movk    x10, #0x802b, lsl #16              movk    x7, #0x8207, lsl #16
+movk    x10, #0x8000, lsl #32              movk    x7, #0x2008
+blr     x10                                mrs     x10, tpidr_el1
+add     x7, x0, #0x0                       add     x7, x7, x10
+                                           ldr     w7, [x7]
+
+Performance improvement using benchmark[1]
+
+             BEFORE                                       AFTER
+            --------                                     -------
+
+glob-arr-inc   :   23.817 ± 0.019M/s      glob-arr-inc   :   24.631 ± 0.027M/s
+arr-inc        :   23.253 ± 0.019M/s      arr-inc        :   23.742 ± 0.023M/s
+hash-inc       :   12.258 ± 0.010M/s      hash-inc       :   12.625 ± 0.004M/s
+
+[1] https://github.com/anakryiko/linux/commit/8dec900975ef
+
+Signed-off-by: Puranjay Mohan <puranjay@kernel.org>
+---
+ kernel/bpf/verifier.c | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/bpf/verifier.c b/kernel/bpf/verifier.c
+index 9715c88cc025..3373be261889 100644
+--- a/kernel/bpf/verifier.c
++++ b/kernel/bpf/verifier.c
+@@ -20205,7 +20205,7 @@ static int do_misc_fixups(struct bpf_verifier_env *env)
+ 			goto next_insn;
+ 		}
+ 
+-#ifdef CONFIG_X86_64
++#if defined(CONFIG_X86_64) || defined(CONFIG_ARM64)
+ 		/* Implement bpf_get_smp_processor_id() inline. */
+ 		if (insn->imm == BPF_FUNC_get_smp_processor_id &&
+ 		    prog->jit_requested && bpf_jit_supports_percpu_insn()) {
+@@ -20214,11 +20214,20 @@ static int do_misc_fixups(struct bpf_verifier_env *env)
+ 			 * changed in some incompatible and hard to support
+ 			 * way, it's fine to back out this inlining logic
+ 			 */
++#if defined(CONFIG_X86_64)
+ 			insn_buf[0] = BPF_MOV32_IMM(BPF_REG_0, (u32)(unsigned long)&pcpu_hot.cpu_number);
+ 			insn_buf[1] = BPF_MOV64_PERCPU_REG(BPF_REG_0, BPF_REG_0);
+ 			insn_buf[2] = BPF_LDX_MEM(BPF_W, BPF_REG_0, BPF_REG_0, 0);
+ 			cnt = 3;
++#elif defined(CONFIG_ARM64)
++			struct bpf_insn cpu_number_addr[2] = { BPF_LD_IMM64(BPF_REG_0, (u64)&cpu_number) };
+ 
++			insn_buf[0] = cpu_number_addr[0];
++			insn_buf[1] = cpu_number_addr[1];
++			insn_buf[2] = BPF_MOV64_PERCPU_REG(BPF_REG_0, BPF_REG_0);
++			insn_buf[3] = BPF_LDX_MEM(BPF_W, BPF_REG_0, BPF_REG_0, 0);
++			cnt = 4;
++#endif
+ 			new_prog = bpf_patch_insn_data(env, i + delta, insn_buf, cnt);
+ 			if (!new_prog)
+ 				return -ENOMEM;
+-- 
+2.40.1
+
