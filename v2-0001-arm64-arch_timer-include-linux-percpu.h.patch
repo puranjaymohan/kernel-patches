@@ -1,0 +1,33 @@
+From e04eaa47897bfa59ffe565df3a9472e3f19f93f0 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay@kernel.org>
+To: Catalin Marinas <catalin.marinas@arm.com>,Will Deacon <will@kernel.org>,Sumit Garg <sumit.garg@linaro.org>,Stephen Boyd <swboyd@chromium.org>,Douglas Anderson <dianders@chromium.org>,"Peter Zijlstra (Intel)" <peterz@infradead.org>,Thomas Gleixner <tglx@linutronix.de>,Mark Rutland <mark.rutland@arm.com>,linux-arm-kernel@lists.infradead.org,linux-kernel@vger.kernel.org,bpf@vger.kernel.org
+Date: Thu, 2 May 2024 12:20:02 +0000
+Subject: [PATCH v2 1/2] arm64/arch_timer: include <linux/percpu.h>
+
+arch_timer.h includes linux/smp.h to use DEFINE_PER_CPU() and it works
+because smp.h includes percpu.h. The next commit will remove percpu.h
+from smp.h and it will break this usage.
+
+Explicitly include percpu.h and remove smp.h
+
+Signed-off-by: Puranjay Mohan <puranjay@kernel.org>
+---
+ arch/arm64/include/asm/arch_timer.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/include/asm/arch_timer.h b/arch/arm64/include/asm/arch_timer.h
+index 934c658ee947..f5794d50f51d 100644
+--- a/arch/arm64/include/asm/arch_timer.h
++++ b/arch/arm64/include/asm/arch_timer.h
+@@ -15,7 +15,7 @@
+ #include <linux/bug.h>
+ #include <linux/init.h>
+ #include <linux/jump_label.h>
+-#include <linux/smp.h>
++#include <linux/percpu.h>
+ #include <linux/types.h>
+ 
+ #include <clocksource/arm_arch_timer.h>
+-- 
+2.40.1
+

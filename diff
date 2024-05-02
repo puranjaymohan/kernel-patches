@@ -19,3 +19,34 @@ Dump of assembler code for function bpf_get_smp_processor_id:
    0xffff8000802c9140 <+16>:    ret
 
 
+Benchmark:
+
+static noinline int get(void)
+{
+	return smp_processor_id();
+}
+
+volatile int cpu;
+ktime_t start, end;
+u64 period;
+
+start = ktime_get();
+for (unsigned int i = 0; i < nr_function_calls; i++)
+        cpu = get();
+end = ktime_get();
+
+period = ktime_to_ns(ktime_sub(end, start));
+
+pr_info("Attempted %u calls to %ps in %lluns (%lluns / call)\n",
+                nr_function_calls, get,
+                period, div_u64(period, nr_function_calls));
+
+
+sudo modprobe ftrace_ops nr_function_calls=1000000000
+
+Before:
+ftrace_ops: Attempted 1000000000 calls to get [ftrace_ops] in 1602888401ns (1ns / call)
+
+After:
+
+
