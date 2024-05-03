@@ -1,0 +1,122 @@
+From db1d0f85e990f104c9cc5499c384ab92e3cfb137 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay@kernel.org>
+Date: Tue, 30 Apr 2024 12:24:59 +0000
+Subject: [PATCH bpf-next v6 4/4] bpf, arm64: inline bpf_get_smp_processor_id()
+ helper
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Inline calls to bpf_get_smp_processor_id() helper in the JIT by emitting
+a read from struct thread_info. The SP_EL0 system register holds the
+pointer to the task_struct and thread_info is the first member of this
+struct. We can read the cpu number from the thread_info.
+
+Here is how the ARM64 JITed assembly changes after this commit:
+
+                                      ARM64 JIT
+                                     ===========
+
+              BEFORE                                    AFTER
+             --------                                  -------
+
+int cpu = bpf_get_smp_processor_id();        int cpu = bpf_get_smp_processor_id();
+
+mov     x10, #0xfffffffffffff4d0             mrs     x10, sp_el0
+movk    x10, #0x802b, lsl #16                ldr     w7, [x10, #24]
+movk    x10, #0x8000, lsl #32
+blr     x10
+add     x7, x0, #0x0
+
+               Performance improvement using benchmark[1]
+
+./benchs/run_bench_trigger.sh glob-arr-inc arr-inc hash-inc
+
++---------------+-------------------+-------------------+--------------+
+|      Name     |      Before       |        After      |   % change   |
+|---------------+-------------------+-------------------+--------------|
+| glob-arr-inc  | 23.380 ± 1.675M/s | 25.893 ± 0.026M/s |   + 10.74%   |
+| arr-inc       | 23.928 ± 0.034M/s | 25.213 ± 0.063M/s |   + 5.37%    |
+| hash-inc      | 12.352 ± 0.005M/s | 12.609 ± 0.013M/s |   + 2.08%    |
++---------------+-------------------+-------------------+--------------+
+
+[1] https://github.com/anakryiko/linux/commit/8dec900975ef
+
+Signed-off-by: Puranjay Mohan <puranjay@kernel.org>
+Acked-by: Andrii Nakryiko <andrii@kernel.org>
+---
+ arch/arm64/include/asm/insn.h |  1 +
+ arch/arm64/net/bpf_jit.h      |  2 ++
+ arch/arm64/net/bpf_jit_comp.c | 25 +++++++++++++++++++++++++
+ 3 files changed, 28 insertions(+)
+
+diff --git a/arch/arm64/include/asm/insn.h b/arch/arm64/include/asm/insn.h
+index 8de0e39b29f3..8c0a36f72d6f 100644
+--- a/arch/arm64/include/asm/insn.h
++++ b/arch/arm64/include/asm/insn.h
+@@ -138,6 +138,7 @@ enum aarch64_insn_special_register {
+ enum aarch64_insn_system_register {
+ 	AARCH64_INSN_SYSREG_TPIDR_EL1	= 0x4684,
+ 	AARCH64_INSN_SYSREG_TPIDR_EL2	= 0x6682,
++	AARCH64_INSN_SYSREG_SP_EL0	= 0x4208,
+ };
+ 
+ enum aarch64_insn_variant {
+diff --git a/arch/arm64/net/bpf_jit.h b/arch/arm64/net/bpf_jit.h
+index b627ef7188c7..b22ab2f97a30 100644
+--- a/arch/arm64/net/bpf_jit.h
++++ b/arch/arm64/net/bpf_jit.h
+@@ -302,5 +302,7 @@
+ 	aarch64_insn_gen_mrs(Rt, AARCH64_INSN_SYSREG_TPIDR_EL1)
+ #define A64_MRS_TPIDR_EL2(Rt) \
+ 	aarch64_insn_gen_mrs(Rt, AARCH64_INSN_SYSREG_TPIDR_EL2)
++#define A64_MRS_SP_EL0(Rt) \
++	aarch64_insn_gen_mrs(Rt, AARCH64_INSN_SYSREG_SP_EL0)
+ 
+ #endif /* _BPF_JIT_H */
+diff --git a/arch/arm64/net/bpf_jit_comp.c b/arch/arm64/net/bpf_jit_comp.c
+index ed8f9716d9d5..1cebe9c92f51 100644
+--- a/arch/arm64/net/bpf_jit_comp.c
++++ b/arch/arm64/net/bpf_jit_comp.c
+@@ -1215,6 +1215,21 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx,
+ 		const u8 r0 = bpf2a64[BPF_REG_0];
+ 		bool func_addr_fixed;
+ 		u64 func_addr;
++		u32 cpu_offset;
++
++		/* Implement helper call to bpf_get_smp_processor_id() inline */
++		if (insn->src_reg == 0 && insn->imm == BPF_FUNC_get_smp_processor_id) {
++			cpu_offset = offsetof(struct thread_info, cpu);
++
++			emit(A64_MRS_SP_EL0(tmp), ctx);
++			if (is_lsi_offset(cpu_offset, 2)) {
++				emit(A64_LDR32I(r0, tmp, cpu_offset), ctx);
++			} else {
++				emit_a64_mov_i(1, tmp2, cpu_offset, ctx);
++				emit(A64_LDR32(r0, tmp, tmp2), ctx);
++			}
++			break;
++		}
+ 
+ 		ret = bpf_jit_get_func_addr(ctx->prog, insn, extra_pass,
+ 					    &func_addr, &func_addr_fixed);
+@@ -2541,6 +2556,16 @@ bool bpf_jit_supports_percpu_insn(void)
+ 	return true;
+ }
+ 
++bool bpf_jit_inlines_helper_call(s32 imm)
++{
++	switch (imm) {
++	case BPF_FUNC_get_smp_processor_id:
++		return true;
++	default:
++		return false;
++	}
++}
++
+ void bpf_jit_free(struct bpf_prog *prog)
+ {
+ 	if (prog->jited) {
+-- 
+2.40.1
+
