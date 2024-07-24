@@ -1,0 +1,41 @@
+From c0bca78eda7faff470a2549af17f06346d939865 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay@kernel.org>
+To: Guo Ren <guoren@kernel.org>, Steven Rostedt (Google) <rostedt@goodmis.org>, linux-csky@vger.kernel.org, linux-kernel@vger.kernel.org
+Date: Wed, 19 Jun 2024 07:25:53 +0000
+Subject: [PATCH] csky: stacktrace: fix usage of ftrace_graph_ret_addr()
+
+ftrace_graph_ret_addr() now returns the passed in return address when NULL
+is passed for the 'idx' paramenter. This breaks the current usage in csky's
+walk_stackframe()
+
+Fix this by passing a valid integer pointer to ftrace_graph_ret_addr()
+
+Signed-off-by: Puranjay Mohan <puranjay@kernel.org>
+---
+ arch/csky/kernel/stacktrace.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/arch/csky/kernel/stacktrace.c b/arch/csky/kernel/stacktrace.c
+index 27ecd63e321b..1d72f18064c2 100644
+--- a/arch/csky/kernel/stacktrace.c
++++ b/arch/csky/kernel/stacktrace.c
+@@ -17,6 +17,7 @@ void notrace walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+ 			     bool (*fn)(unsigned long, void *), void *arg)
+ {
+ 	unsigned long fp, sp, pc;
++	int graph_idx = 0;
+ 
+ 	if (regs) {
+ 		fp = frame_pointer(regs);
+@@ -50,7 +51,7 @@ void notrace walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+ 		frame = (struct stackframe *)fp;
+ 		sp = fp;
+ 		fp = frame->fp;
+-		pc = ftrace_graph_ret_addr(current, NULL, frame->ra,
++		pc = ftrace_graph_ret_addr(current, &graph_idx, frame->ra,
+ 					   (unsigned long *)(fp - 8));
+ 	}
+ }
+-- 
+2.40.1
+

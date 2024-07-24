@@ -1,0 +1,82 @@
+From 0148a5d0c642816d9f7109417967f52089c12fc5 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay@kernel.org>
+To: Alan Stern <stern@rowland.harvard.edu>,Andrea Parri <parri.andrea@gmail.com>,Will Deacon <will@kernel.org>,Peter Zijlstra <peterz@infradead.org>,Boqun Feng <boqun.feng@gmail.com>,Nicholas Piggin <npiggin@gmail.com>,David Howells <dhowells@redhat.com>,Jade Alglave <j.alglave@ucl.ac.uk>,Luc Maranget <luc.maranget@inria.fr>,"Paul E. McKenney" <paulmck@kernel.org>,Akira Yokosawa <akiyks@gmail.com>,Daniel Lustig <dlustig@nvidia.com>,Joel Fernandes <joel@joelfernandes.org>,linux-kernel@vger.kernel.org,linux-arch@vger.kernel.org
+Date: Tue, 14 May 2024 09:17:37 +0000
+Subject: [PATCH] tools/memory-model: Add atomic_andnot() with its variants
+
+Pull-855[1] added the support of atomic_andnot() to the herd tool. Use
+this to add the implementation in the LKMM. All of the ordering variants
+are also added.
+
+Here is a small litmus-test that uses this operation:
+
+C andnot
+
+{
+atomic_t u = ATOMIC_INIT(7);
+}
+
+P0(atomic_t *u)
+{
+
+        r0 = atomic_fetch_andnot(3, u);
+        r1 = READ_ONCE(*u);
+}
+
+exists (0:r0=7 /\ 0:r1=4)
+
+Test andnot Allowed
+States 1
+0:r0=7; 0:r1=4;
+Ok
+Witnesses
+Positive: 1 Negative: 0
+Condition exists (0:r0=7 /\ 0:r1=4)
+Observation andnot Always 1 0
+Time andnot 0.00
+Hash=78f011a0b5a0c65fa1cf106fcd62c845
+
+[1] https://github.com/herd/herdtools7/pull/855
+
+Signed-off-by: Puranjay Mohan <puranjay@kernel.org>
+---
+
+This commit is based on the commit[1] that is adding `&`, `|`, and `^`.
+
+Both of these patches should go together when the next version of herd7 is
+released. I will update the "REQUIREMENTS" section when the new version is
+released.
+
+Later on, I will add some example litmus tests to showcase the usage of
+these new operations.
+
+[1] https://lore.kernel.org/all/20240508143400.36256-1-puranjay@kernel.org/
+
+---
+ tools/memory-model/linux-kernel.def | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/tools/memory-model/linux-kernel.def b/tools/memory-model/linux-kernel.def
+index d1f11930ec51..a12b96c547b7 100644
+--- a/tools/memory-model/linux-kernel.def
++++ b/tools/memory-model/linux-kernel.def
+@@ -70,6 +70,7 @@ atomic_or(V,X)  { __atomic_op(X,|,V); }
+ atomic_xor(V,X) { __atomic_op(X,^,V); }
+ atomic_inc(X)   { __atomic_op(X,+,1); }
+ atomic_dec(X)   { __atomic_op(X,-,1); }
++atomic_andnot(V,X) { __atomic_op(X,&~,V); }
+ 
+ atomic_add_return(V,X) __atomic_op_return{mb}(X,+,V)
+ atomic_add_return_relaxed(V,X) __atomic_op_return{once}(X,+,V)
+@@ -138,3 +139,8 @@ atomic_add_negative(V,X) __atomic_op_return{mb}(X,+,V) < 0
+ atomic_add_negative_relaxed(V,X) __atomic_op_return{once}(X,+,V) < 0
+ atomic_add_negative_acquire(V,X) __atomic_op_return{acquire}(X,+,V) < 0
+ atomic_add_negative_release(V,X) __atomic_op_return{release}(X,+,V) < 0
++
++atomic_fetch_andnot(V,X) __atomic_fetch_op{mb}(X,&~,V)
++atomic_fetch_andnot_acquire(V,X) __atomic_fetch_op{acquire}(X,&~,V)
++atomic_fetch_andnot_release(V,X) __atomic_fetch_op{release}(X,&~,V)
++atomic_fetch_andnot_relaxed(V,X) __atomic_fetch_op{once}(X,&~,V)
+-- 
+2.40.1
+

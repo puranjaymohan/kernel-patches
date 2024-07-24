@@ -1,0 +1,34 @@
+From 3cba42683671dedc1b9b7d8a73bcf6ac355727a4 Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay@kernel.org>
+To: Alexei Starovoitov <ast@kernel.org>, Daniel Borkmann <daniel@iogearbox.net>, Andrii Nakryiko <andrii@kernel.org>, Martin KaFai Lau <martin.lau@linux.dev>, bpf@vger.kernel.org, Zi Shen Lim <zlim.lnx@gmail.com>
+Date: Tue, 14 May 2024 18:28:21 +0000
+Subject: [PATCH bpf] MAINTAINERS: Update ARM64 BPF JIT maintainer
+
+Zi Shen Lim is not actively doing kernel development and has decided to
+tranfer the responsibility of maintaining the JIT to me.
+
+Add myself as the maintainer for BPF JIT for ARM64 and remove Zi Shen
+Lim.
+
+Signed-off-by: Puranjay Mohan <puranjay@kernel.org>
+Acked-by: Zi Shen Lim <zlim.lnx@gmail.com>
+---
+ MAINTAINERS | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 05720fcc95cb..95beaf4dccf7 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -3722,7 +3722,7 @@ F:	arch/arm/net/
+ BPF JIT for ARM64
+ M:	Daniel Borkmann <daniel@iogearbox.net>
+ M:	Alexei Starovoitov <ast@kernel.org>
+-M:	Zi Shen Lim <zlim.lnx@gmail.com>
++M:	Puranjay Mohan <puranjay@kernel.org>
+ L:	bpf@vger.kernel.org
+ S:	Supported
+ F:	arch/arm64/net/
+-- 
+2.40.1
+

@@ -1,0 +1,28 @@
+From 5717c4924be6b39805ec096a6cd884be80c289eb Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay@kernel.org>
+To: Andrii Nakryiko <andrii@kernel.org>,Eduard Zingerman <eddyz87@gmail.com>,Mykola Lysenko <mykolal@fb.com>,Alexei Starovoitov <ast@kernel.org>,Daniel Borkmann <daniel@iogearbox.net>,Martin KaFai Lau <martin.lau@linux.dev>,Song Liu <song@kernel.org>,Yonghong Song <yonghong.song@linux.dev>,John Fastabend <john.fastabend@gmail.com>,KP Singh <kpsingh@kernel.org>,Stanislav Fomichev <sdf@google.com>,Hao Luo <haoluo@google.com>,Jiri Olsa <jolsa@kernel.org>,Shuah Khan <shuah@kernel.org>,bpf@vger.kernel.org,linux-kselftest@vger.kernel.org,linux-kernel@vger.kernel.org, puranjay12@gmail.com
+Date: Fri, 5 Jul 2024 13:31:58 +0000
+Subject: [PATCH bpf] selftests/bpf: DENYLIST.aarch64: Remove fexit_sleep
+
+fexit_sleep test runs successfully now on the CI so remove it from the
+deny list.
+
+Signed-off-by: Puranjay Mohan <puranjay@kernel.org>
+---
+ tools/testing/selftests/bpf/DENYLIST.aarch64 | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/tools/testing/selftests/bpf/DENYLIST.aarch64 b/tools/testing/selftests/bpf/DENYLIST.aarch64
+index e865451e90d2..2bf981c80180 100644
+--- a/tools/testing/selftests/bpf/DENYLIST.aarch64
++++ b/tools/testing/selftests/bpf/DENYLIST.aarch64
+@@ -1,6 +1,5 @@
+ bpf_cookie/multi_kprobe_attach_api               # kprobe_multi_link_api_subtest:FAIL:fentry_raw_skel_load unexpected error: -3
+ bpf_cookie/multi_kprobe_link_api                 # kprobe_multi_link_api_subtest:FAIL:fentry_raw_skel_load unexpected error: -3
+-fexit_sleep                                      # The test never returns. The remaining tests cannot start.
+ kprobe_multi_bench_attach                        # needs CONFIG_FPROBE
+ kprobe_multi_test                                # needs CONFIG_FPROBE
+ module_attach                                    # prog 'kprobe_multi': failed to auto-attach: -95
+-- 
+2.40.1
+

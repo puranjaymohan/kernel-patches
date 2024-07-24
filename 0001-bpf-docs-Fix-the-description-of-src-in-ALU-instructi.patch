@@ -1,0 +1,41 @@
+From 5dd2268605eb668d1721eaba0057b50f07210acc Mon Sep 17 00:00:00 2001
+From: Puranjay Mohan <puranjay@kernel.org>
+To: David Vernet <void@manifault.com>,Alexei Starovoitov <ast@kernel.org>,Daniel Borkmann <daniel@iogearbox.net>,Andrii Nakryiko <andrii@kernel.org>,Martin KaFai Lau <martin.lau@linux.dev>,Eduard Zingerman <eddyz87@gmail.com>,Song Liu <song@kernel.org>,Yonghong Song <yonghong.song@linux.dev>,John Fastabend <john.fastabend@gmail.com>,KP Singh <kpsingh@kernel.org>,Stanislav Fomichev <sdf@google.com>,Hao Luo <haoluo@google.com>,Jiri Olsa <jolsa@kernel.org>,Jonathan Corbet <corbet@lwn.net>,Dave Thaler <dthaler1968@googlemail.com>,Will Hawkins <hawkinsw@obs.cr>,bpf@vger.kernel.org,bpf@ietf.org,linux-doc@vger.kernel.org,linux-kernel@vger.kernel.org
+Date: Tue, 14 May 2024 12:14:27 +0000
+Subject: [PATCH bpf] bpf, docs: Fix the description of 'src' in ALU
+ instructions
+
+An ALU instruction's source operand can be the value in the source
+register or the 32-bit immediate value encoded in the instruction. This
+is controlled by the 's' bit of the 'opcode'.
+
+The current description explicitly uses the phrase 'value of the source
+register' when defining the meaning of 'src'.
+
+Change the description to use 'source operand' in place of 'value of the
+source register'.
+
+Signed-off-by: Puranjay Mohan <puranjay@kernel.org>
+---
+ Documentation/bpf/standardization/instruction-set.rst | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/bpf/standardization/instruction-set.rst b/Documentation/bpf/standardization/instruction-set.rst
+index a5ab00ac0b14..2e17b365388e 100644
+--- a/Documentation/bpf/standardization/instruction-set.rst
++++ b/Documentation/bpf/standardization/instruction-set.rst
+@@ -292,8 +292,9 @@ Arithmetic instructions
+ ``ALU`` uses 32-bit wide operands while ``ALU64`` uses 64-bit wide operands for
+ otherwise identical operations. ``ALU64`` instructions belong to the
+ base64 conformance group unless noted otherwise.
+-The 'code' field encodes the operation as below, where 'src' and 'dst' refer
+-to the values of the source and destination registers, respectively.
++The 'code' field encodes the operation as below, where 'src' refers to the
++the source operand and 'dst' refers to the value of the destination
++register.
+ 
+ =====  =====  =======  ==========================================================
+ name   code   offset   description
+-- 
+2.40.1
+

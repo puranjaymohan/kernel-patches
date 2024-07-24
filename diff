@@ -1,0 +1,22 @@
+
+Example program:
+
+  atomic_t cnt = ATOMIC_INIT(0);
+  atomic_fetch_add_acquire(1, &cnt);
+  atomic_fetch_add_release(1, &cnt);
+
+Before:
+
+  amoadd.w        a4,a5,(a4)  // Atomic add with relaxed ordering
+  fence   r,rw		      // Fence to force Acquire ordering
+
+  fence   rw,w		      // Fence to force Release ordering
+  amoadd.w        a4,a5,(a4)  // Atomic add with relaxed ordering
+
+After:
+
+
+  amoadd.w.aq     a4,a5,(a4)  // Atomic add with Acquire ordering
+
+  amoadd.w.rl     a4,a5,(a4)  // Atomic add with Release ordering
+
